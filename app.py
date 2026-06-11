@@ -7,6 +7,7 @@ A stock analysis tool that ANYONE can understand.
 
 import streamlit as st
 import yfinance as yf
+from concurrent.futures import ThreadPoolExecutor
 from typing import Optional, Dict, Any, List, Tuple
 
 from src.data.fetcher import fetch_company_data, fetch_peers, fetch_peer_metrics, compute_peer_averages
@@ -1186,31 +1187,52 @@ if page == "🏠 Dashboard":
         st.error(f"No data found for ticker '{ticker}'. Please check the symbol and try again.")
         st.stop()
 
-    # Fetch peers
-    peer_tickers = fetch_peers(company.get("sector", ""), company.get("industry", ""), ticker)
-    peer_data = fetch_peer_metrics(peer_tickers) if peer_tickers else {}
-    peer_averages = compute_peer_averages(peer_data) if peer_data else {}
+    # ── Kick off independent I/O fetches while we compute scores ──
+    # All of these are independent of each other AND of the scoring
+    # computations below.  Running them concurrently lets the I/O wait
+    # overlap with the CPU-bound scoring work in the main thread.
+    with ThreadPoolExecutor(max_workers=6) as _io_executor:
+        _f_macro = _io_executor.submit(fetch_macro_context)
+        _f_indices = _io_executor.submit(fetch_market_indices)
+        _f_analyst = _io_executor.submit(fetch_analyst_data, ticker)
+        _f_inst = _io_executor.submit(fetch_institutional_data, ticker)
+        _f_movers = _io_executor.submit(fetch_top_movers)
+        _f_news = _io_executor.submit(fetch_market_news)
 
-    # Compute scores
-    health_score, health_verdict, fscore, fscore_criteria = compute_health_score(data)
-    z_score, z_zone, z_explanation = compute_altman_zscore(data)
+        # Peers (depends on sector/industry from company data, but NOT on
+        # the I/O fetches above — so do it in the main thread while I/O runs).
+        peer_tickers = fetch_peers(company.get("sector", ""), company.get("industry", ""), ticker)
+        peer_data = fetch_peer_metrics(peer_tickers) if peer_tickers else {}
+        peer_averages = compute_peer_averages(peer_data) if peer_data else {}
 
-    # Price verdict
-    price_score, price_verdict, price_short, price_detail = compute_price_verdict(data, peer_averages)
+        # Compute scores (CPU-bound — fast, runs while I/O is in flight)
+        health_score, health_verdict, fscore, fscore_criteria = compute_health_score(data)
+        z_score, z_zone, z_explanation = compute_altman_zscore(data)
 
-    # Risk assessment
-    risk_score, risk_label, risk_summary, risk_factors = compute_risk_assessment(data, z_score, z_zone)
-    red_flags = compute_red_flags(data, risk_factors)
+        # Price verdict
+        price_score, price_verdict, price_short, price_detail = compute_price_verdict(data, peer_averages)
 
-    # Intrinsic worth
-    intrinsic_score, intrinsic_verdict, intrinsic_expl, intrinsic_detail, intrinsic_bd = compute_intrinsic_worth(data)
-    # Build a short summary for the card
-    if intrinsic_bd.get("graham_ratio"):
-        intrinsic_summary = f"Trades at {intrinsic_bd['graham_ratio']}x Graham Number"
-    elif intrinsic_bd.get("fcf_yield"):
-        intrinsic_summary = f"FCF yield: {intrinsic_bd['fcf_yield']}%"
-    else:
-        intrinsic_summary = intrinsic_expl[:80]
+        # Risk assessment
+        risk_score, risk_label, risk_summary, risk_factors = compute_risk_assessment(data, z_score, z_zone)
+        red_flags = compute_red_flags(data, risk_factors)
+
+        # Intrinsic worth
+        intrinsic_score, intrinsic_verdict, intrinsic_expl, intrinsic_detail, intrinsic_bd = compute_intrinsic_worth(data)
+        # Build a short summary for the card
+        if intrinsic_bd.get("graham_ratio"):
+            intrinsic_summary = f"Trades at {intrinsic_bd['graham_ratio']}x Graham Number"
+        elif intrinsic_bd.get("fcf_yield"):
+            intrinsic_summary = f"FCF yield: {intrinsic_bd['fcf_yield']}%"
+        else:
+            intrinsic_summary = intrinsic_expl[:80]
+
+        # ── Collect I/O results (most should be ready by now) ──
+        macro_data = _f_macro.result()
+        indices_data = _f_indices.result()
+        analyst_data = _f_analyst.result()
+        inst_data = _f_inst.result()
+        movers = _f_movers.result()
+        market_news = _f_news.result()
 
     # ─── Render Dashboard ──────────────────────────────
 
@@ -1287,9 +1309,6 @@ if page == "🏠 Dashboard":
     render_live_ticker(ticker, initial_price, initial_change)
 
     # ── Market Macro Strip ───────────────────────────
-    with st.spinner("Fetching market context..."):
-        macro_data = fetch_macro_context()
-        indices_data = fetch_market_indices()
     render_macro_strip(macro_data)
 
     # ── Market Indices Strip ─────────────────────────
@@ -1303,8 +1322,6 @@ if page == "🏠 Dashboard":
                           risk_score, risk_label, risk_summary)
 
     # ── Analyst Consensus ─────────────────────────────
-    with st.spinner("Fetching analyst data..."):
-        analyst_data = fetch_analyst_data(ticker)
     if analyst_data:
         st.markdown('<div class="section-title">🎯 ANALYST CONSENSUS</div>', unsafe_allow_html=True)
         render_analyst_consensus(analyst_data, company.get("name", ticker))
@@ -1396,25 +1413,20 @@ if page == "🏠 Dashboard":
         st.markdown("<hr>", unsafe_allow_html=True)
 
     # ── Institutional Activity ─────────────────────────
-    inst_data = fetch_institutional_data(ticker)
     if inst_data and inst_data.get("holders"):
         st.markdown('<div class="section-title">🏛️ INSTITUTIONAL ACTIVITY</div>', unsafe_allow_html=True)
         render_institutional_activity(inst_data)
         st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ── Top Movers + Market News ──────────────────────
+    # ── Top Movers + Market News (pre-fetched concurrently) ─
     mover_col, news_col = st.columns([1, 1])
 
     with mover_col:
         st.markdown('<div class="section-title">🔥 TODAY\'S TOP MOVERS</div>', unsafe_allow_html=True)
-        with st.spinner("Scanning top movers..."):
-            movers = fetch_top_movers()
         render_top_movers(movers)
 
     with news_col:
         st.markdown('<div class="section-title">📰 LATEST MARKET NEWS</div>', unsafe_allow_html=True)
-        with st.spinner("Fetching market news..."):
-            market_news = fetch_market_news()
         render_market_news_section(market_news)
 
     st.markdown("<hr>", unsafe_allow_html=True)

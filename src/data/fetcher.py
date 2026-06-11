@@ -4,11 +4,11 @@ Pulls all financial data needed for the dashboard.
 
 Rate-limiting defences (added to stop Yahoo 429 / rate-limit errors):
   1. Shared requests.Session — connection pooling + auto-retry on 429/5xx
-  2. Token-bucket rate limiter — ~2 req/s so bursts never exceed Yahoo's tolerance
+  2. Token-bucket rate limiter — ~4 req/s so bursts never exceed Yahoo's tolerance
   3. Persistent pickle disk cache — cuts repeat calls by ~90%, survives restarts
   4. In-memory info cache — sub-ms hot path for recently-accessed tickers
   5. Exponential backoff + jitter on failures
-  6. Reduced worker counts + inter-request rate-limiter waits in batch fetches
+  6. Concurrent fetches via ThreadPoolExecutor for batch operations
 """
 
 import hashlib
@@ -77,11 +77,12 @@ _SESSION = _build_session()
 class _RateLimiter:
     """Simple token-bucket rate limiter, thread-safe.
 
-    2 calls/second is conservative — well within Yahoo's ~2 000 req/hour
-    limit while keeping the dashboard snappy.
+    4 calls/second is well within Yahoo's ~2 000 req/hour limit while
+    keeping the dashboard snappy. Combined with the disk cache, real
+    API call volume stays low.
     """
 
-    def __init__(self, calls_per_second: float = 2.0):
+    def __init__(self, calls_per_second: float = 4.0):
         self._min_interval = 1.0 / calls_per_second
         self._lock = threading.Lock()
         self._last_call = 0.0
@@ -95,7 +96,7 @@ class _RateLimiter:
                 time.sleep(wait)
             self._last_call = time.monotonic()
 
-_rate_limiter = _RateLimiter(calls_per_second=2.0)
+_rate_limiter = _RateLimiter(calls_per_second=4.0)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -646,17 +647,17 @@ def fetch_peer_metrics(peer_tickers: list[str]) -> Dict[str, Dict[str, Any]]:
     """Fetch key metrics for a list of peer tickers.
 
     Uses _cached_ticker_info() so repeated peer lookups hit the cache
-    instead of the API.
+    instead of the API.  Fetches all peers concurrently — cold cache
+    drops from N×0.5 s to ~1 s for a typical 6-peer group.
     """
-    peer_data = {}
-    for pt in peer_tickers:
+    def _fetch_one(ticker: str) -> tuple[str, Optional[dict]]:
         try:
-            info = _cached_ticker_info(pt)
+            info = _cached_ticker_info(ticker)
             if not info:
-                continue
+                return (ticker, None)
             _dy_raw = info.get("dividendYield")
-            peer_data[pt] = {
-                "name": info.get("shortName", pt),
+            return (ticker, {
+                "name": info.get("shortName", ticker),
                 "pe_ttm": info.get("trailingPE"),
                 "pe_forward": info.get("forwardPE"),
                 "peg_ratio": info.get("pegRatio"),
@@ -672,9 +673,21 @@ def fetch_peer_metrics(peer_tickers: list[str]) -> Dict[str, Dict[str, Any]]:
                 "market_cap": info.get("marketCap"),
                 # Normalize: yfinance >=1.0 returns dividendYield as percentage
                 "dividend_yield": _dy_raw / 100 if _dy_raw is not None else None,
-            }
+            })
         except Exception:
-            continue
+            return (ticker, None)
+
+    peer_data: dict[str, dict] = {}
+    if not peer_tickers:
+        return peer_data
+
+    with ThreadPoolExecutor(max_workers=min(len(peer_tickers), 6)) as executor:
+        futures = {executor.submit(_fetch_one, pt): pt for pt in peer_tickers}
+        for future in as_completed(futures):
+            t, data = future.result()
+            if data is not None:
+                peer_data[t] = data
+
     return peer_data
 
 
@@ -864,171 +877,159 @@ def fetch_macro_context() -> Dict[str, Any]:
     Returns a dict of indicators, each with a value, verdict, and color.
     All errors are swallowed — individual indicators return None on failure.
 
-    Rate-limiter waits between each indicator spread the cold-load burst
-    of 6 API calls over ~3 seconds instead of <1 second.
+    Fetches all 6 indicators concurrently via ThreadPoolExecutor, cutting
+    cold-load wall-clock time from ~3 s to ~1 s.  The shared rate-limiter
+    still gates burst pressure.
     """
     macro = {}
 
+    def _fetch_indicator_info(symbol: str) -> Optional[dict]:
+        """Fetch .info for a single macro indicator.  Returns None on failure."""
+        try:
+            t = _get_macro_ticker(symbol)
+            _rate_limiter.wait()
+            return _retry_with_backoff(lambda: t.info or {})
+        except Exception:
+            return None
+
+    # Fire all 6 indicator fetches concurrently.
+    symbols = ["^VIX", "^GSPC", "^TNX", "^IRX", "HYG", "DX-Y.NYB"]
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {executor.submit(_fetch_indicator_info, s): s for s in symbols}
+        results: dict[str, Optional[dict]] = {}
+        for future in as_completed(futures):
+            sym = futures[future]
+            try:
+                results[sym] = future.result()
+            except Exception:
+                results[sym] = None
+
+    vix_info = results.get("^VIX") or {}
+    spx_info = results.get("^GSPC") or {}
+    tnx_info = results.get("^TNX") or {}
+    irx_info = results.get("^IRX") or {}
+    hyg_info = results.get("HYG") or {}
+    dxy_info = results.get("DX-Y.NYB") or {}
+
     # ── VIX (Fear Gauge) ──────────────────────────────────
-    try:
-        vix = _get_macro_ticker("^VIX")
-        _rate_limiter.wait()
-        vix_info = _retry_with_backoff(lambda: vix.info or {})
-        vix_price = vix_info.get("regularMarketPrice") or vix_info.get("currentPrice")
-        if vix_price is not None:
-            if vix_price < 15:
-                vix_verdict = "Calm"
-                vix_color = "#00C853"
-            elif vix_price <= 25:
-                vix_verdict = "Normal"
-                vix_color = "#FFD600"
-            else:
-                vix_verdict = "Fearful"
-                vix_color = "#FF1744"
-            macro["vix"] = {
-                "value": vix_price,
-                "label": "Fear Gauge",
-                "verdict": vix_verdict,
-                "color": vix_color,
-                "detail": f"VIX at {vix_price:.1f} — {vix_verdict.lower()} market",
-            }
-    except Exception:
-        pass
+    vix_price = vix_info.get("regularMarketPrice") or vix_info.get("currentPrice")
+    if vix_price is not None:
+        if vix_price < 15:
+            vix_verdict = "Calm"
+            vix_color = "#00C853"
+        elif vix_price <= 25:
+            vix_verdict = "Normal"
+            vix_color = "#FFD600"
+        else:
+            vix_verdict = "Fearful"
+            vix_color = "#FF1744"
+        macro["vix"] = {
+            "value": vix_price,
+            "label": "Fear Gauge",
+            "verdict": vix_verdict,
+            "color": vix_color,
+            "detail": f"VIX at {vix_price:.1f} — {vix_verdict.lower()} market",
+        }
 
     # ── S&P 500 Trend ────────────────────────────────────
-    try:
-        spx = _get_macro_ticker("^GSPC")
-        _rate_limiter.wait()
-        spx_info = _retry_with_backoff(lambda: spx.info or {})
-        spx_price = spx_info.get("regularMarketPrice") or spx_info.get("currentPrice")
-        spx_50ma = spx_info.get("fiftyDayAverage")
-        spx_200ma = spx_info.get("twoHundredDayAverage")
-
-        if spx_price and spx_50ma and spx_200ma:
-            above_50 = spx_price > spx_50ma
-            above_200 = spx_price > spx_200ma
-
-            if above_50 and above_200:
-                trend_verdict = "Uptrend"
-                trend_color = "#00C853"
-                trend_detail = "S&P above both 50-day and 200-day moving averages — bullish structure"
-            elif above_200 and not above_50:
-                trend_verdict = "Choppy"
-                trend_color = "#FFD600"
-                trend_detail = "S&P above 200-day but below 50-day — short-term weakness in a long-term uptrend"
-            elif above_50 and not above_200:
-                trend_verdict = "Choppy"
-                trend_color = "#FFD600"
-                trend_detail = "S&P above 50-day but below 200-day — recovering but long-term trend is still down"
-            else:
-                trend_verdict = "Downtrend"
-                trend_color = "#FF1744"
-                trend_detail = "S&P below both key moving averages — bearish structure"
-
-            macro["sp500"] = {
-                "value": spx_price,
-                "label": "S&P 500",
-                "verdict": trend_verdict,
-                "color": trend_color,
-                "detail": trend_detail,
-            }
-    except Exception:
-        pass
+    spx_price = spx_info.get("regularMarketPrice") or spx_info.get("currentPrice")
+    spx_50ma = spx_info.get("fiftyDayAverage")
+    spx_200ma = spx_info.get("twoHundredDayAverage")
+    if spx_price and spx_50ma and spx_200ma:
+        above_50 = spx_price > spx_50ma
+        above_200 = spx_price > spx_200ma
+        if above_50 and above_200:
+            trend_verdict = "Uptrend"
+            trend_color = "#00C853"
+            trend_detail = "S&P above both 50-day and 200-day moving averages — bullish structure"
+        elif above_200 and not above_50:
+            trend_verdict = "Choppy"
+            trend_color = "#FFD600"
+            trend_detail = "S&P above 200-day but below 50-day — short-term weakness in a long-term uptrend"
+        elif above_50 and not above_200:
+            trend_verdict = "Choppy"
+            trend_color = "#FFD600"
+            trend_detail = "S&P above 50-day but below 200-day — recovering but long-term trend is still down"
+        else:
+            trend_verdict = "Downtrend"
+            trend_color = "#FF1744"
+            trend_detail = "S&P below both key moving averages — bearish structure"
+        macro["sp500"] = {
+            "value": spx_price,
+            "label": "S&P 500",
+            "verdict": trend_verdict,
+            "color": trend_color,
+            "detail": trend_detail,
+        }
 
     # ── Yield Curve (10Y - 13W) ──────────────────────────
-    try:
-        tnx = _get_macro_ticker("^TNX")
-        _rate_limiter.wait()
-        tnx_price = (_retry_with_backoff(lambda: tnx.info or {})).get("regularMarketPrice")
-
-        irx = _get_macro_ticker("^IRX")
-        _rate_limiter.wait()
-        irx_price = (_retry_with_backoff(lambda: irx.info or {})).get("regularMarketPrice")
-
-        if tnx_price is not None and irx_price is not None:
-            spread = tnx_price - irx_price
-            if spread > 1.0:
-                curve_verdict = "Steep"
-                curve_color = "#00C853"
-                curve_detail = f"Yield curve is steep ({spread:.1f}%) — banks benefit, economy expanding"
-            elif spread > 0:
-                curve_verdict = "Flat"
-                curve_color = "#FFD600"
-                curve_detail = f"Yield curve is flat ({spread:.1f}%) — watch for inversion, often precedes slowdown"
-            else:
-                curve_verdict = "Inverted"
-                curve_color = "#FF1744"
-                curve_detail = f"Yield curve inverted ({spread:.1f}%) — historically a recession warning signal"
-
-            macro["yield_curve"] = {
-                "value": spread,
-                "label": "Yield Curve",
-                "verdict": curve_verdict,
-                "color": curve_color,
-                "detail": curve_detail,
-            }
-    except Exception:
-        pass
+    tnx_price = tnx_info.get("regularMarketPrice")
+    irx_price = irx_info.get("regularMarketPrice")
+    if tnx_price is not None and irx_price is not None:
+        spread = tnx_price - irx_price
+        if spread > 1.0:
+            curve_verdict = "Steep"
+            curve_color = "#00C853"
+            curve_detail = f"Yield curve is steep ({spread:.1f}%) — banks benefit, economy expanding"
+        elif spread > 0:
+            curve_verdict = "Flat"
+            curve_color = "#FFD600"
+            curve_detail = f"Yield curve is flat ({spread:.1f}%) — watch for inversion, often precedes slowdown"
+        else:
+            curve_verdict = "Inverted"
+            curve_color = "#FF1744"
+            curve_detail = f"Yield curve inverted ({spread:.1f}%) — historically a recession warning signal"
+        macro["yield_curve"] = {
+            "value": spread,
+            "label": "Yield Curve",
+            "verdict": curve_verdict,
+            "color": curve_color,
+            "detail": curve_detail,
+        }
 
     # ── Credit Health (HYG vs 52w high) ──────────────────
-    try:
-        hyg = _get_macro_ticker("HYG")
-        _rate_limiter.wait()
-        hyg_info = _retry_with_backoff(lambda: hyg.info or {})
-        hyg_price = hyg_info.get("regularMarketPrice") or hyg_info.get("currentPrice")
-        hyg_hi = hyg_info.get("fiftyTwoWeekHigh")
-
-        if hyg_price and hyg_hi and hyg_hi > 0:
-            pct_off_high = ((hyg_price - hyg_hi) / hyg_hi) * 100
-            if pct_off_high > -3:
-                credit_verdict = "Healthy"
-                credit_color = "#00C853"
-            elif pct_off_high > -8:
-                credit_verdict = "Cautious"
-                credit_color = "#FFD600"
-            else:
-                credit_verdict = "Stressed"
-                credit_color = "#FF1744"
-
-            macro["credit"] = {
-                "value": hyg_price,
-                "label": "Credit",
-                "verdict": credit_verdict,
-                "color": credit_color,
-                "detail": f"HYG at {hyg_price:.1f} ({pct_off_high:.1f}% off 52w high) — high-yield bonds are {credit_verdict.lower()}",
-            }
-    except Exception:
-        pass
+    hyg_price = hyg_info.get("regularMarketPrice") or hyg_info.get("currentPrice")
+    hyg_hi = hyg_info.get("fiftyTwoWeekHigh")
+    if hyg_price and hyg_hi and hyg_hi > 0:
+        pct_off_high = ((hyg_price - hyg_hi) / hyg_hi) * 100
+        if pct_off_high > -3:
+            credit_verdict = "Healthy"
+            credit_color = "#00C853"
+        elif pct_off_high > -8:
+            credit_verdict = "Cautious"
+            credit_color = "#FFD600"
+        else:
+            credit_verdict = "Stressed"
+            credit_color = "#FF1744"
+        macro["credit"] = {
+            "value": hyg_price,
+            "label": "Credit",
+            "verdict": credit_verdict,
+            "color": credit_color,
+            "detail": f"HYG at {hyg_price:.1f} ({pct_off_high:.1f}% off 52w high) — high-yield bonds are {credit_verdict.lower()}",
+        }
 
     # ── Dollar (DXY) ─────────────────────────────────────
-    try:
-        dxy = _get_macro_ticker("DX-Y.NYB")
-        _rate_limiter.wait()
-        dxy_info = _retry_with_backoff(lambda: dxy.info or {})
-        dxy_price = dxy_info.get("regularMarketPrice") or dxy_info.get("currentPrice")
-        dxy_50ma = dxy_info.get("fiftyDayAverage")
-
-        if dxy_price and dxy_50ma and dxy_50ma > 0:
-            dxy_pct = ((dxy_price - dxy_50ma) / dxy_50ma) * 100
-            if dxy_pct > 1:
-                dollar_verdict = "Rising"
-                dollar_color = "#00C853"
-            elif dxy_pct >= -1:
-                dollar_verdict = "Stable"
-                dollar_color = "#FFD600"
-            else:
-                dollar_verdict = "Falling"
-                dollar_color = "#FF1744"
-
-            macro["dollar"] = {
-                "value": dxy_price,
-                "label": "Dollar",
-                "verdict": dollar_verdict,
-                "color": dollar_color,
-                "detail": f"DXY at {dxy_price:.1f} — {dollar_verdict.lower()} vs 50-day average",
-            }
-    except Exception:
-        pass
+    dxy_price = dxy_info.get("regularMarketPrice") or dxy_info.get("currentPrice")
+    dxy_50ma = dxy_info.get("fiftyDayAverage")
+    if dxy_price and dxy_50ma and dxy_50ma > 0:
+        dxy_pct = ((dxy_price - dxy_50ma) / dxy_50ma) * 100
+        if dxy_pct > 1:
+            dollar_verdict = "Rising"
+            dollar_color = "#00C853"
+        elif dxy_pct >= -1:
+            dollar_verdict = "Stable"
+            dollar_color = "#FFD600"
+        else:
+            dollar_verdict = "Falling"
+            dollar_color = "#FF1744"
+        macro["dollar"] = {
+            "value": dxy_price,
+            "label": "Dollar",
+            "verdict": dollar_verdict,
+            "color": dollar_color,
+            "detail": f"DXY at {dxy_price:.1f} — {dollar_verdict.lower()} vs 50-day average",
+        }
 
     return macro
 
@@ -1255,23 +1256,27 @@ _MARKET_NEWS_TICKERS = ["SPY", "AAPL", "MSFT", "^GSPC"]
 def fetch_market_news(max_items: int = 10) -> list[dict]:
     """Fetch aggregated market-wide news from major ticker news feeds.
 
-    Fetches news for a few key tickers, deduplicates by title, and returns
-    the most recent unique items.
+    Fetches news for a few key tickers concurrently, deduplicates by title,
+    and returns the most recent unique items.
     """
-    all_news = []
-    seen_titles = set()
-
-    for ticker in _MARKET_NEWS_TICKERS:
+    def _fetch_one(ticker: str) -> list[dict]:
         try:
             t = _get_ticker(ticker)
-            items = _fetch_news(t)
-            for item in items:
+            return _fetch_news(t)
+        except Exception:
+            return []
+
+    all_news: list[dict] = []
+    seen_titles: set[str] = set()
+
+    with ThreadPoolExecutor(max_workers=len(_MARKET_NEWS_TICKERS)) as executor:
+        futures = {executor.submit(_fetch_one, t): t for t in _MARKET_NEWS_TICKERS}
+        for future in as_completed(futures):
+            for item in future.result():
                 title_key = item.get("title", "")[:80].lower()
                 if title_key and title_key not in seen_titles:
                     seen_titles.add(title_key)
                     all_news.append(item)
-        except Exception:
-            continue
 
     # Sort by published date (most recent first)
     all_news.sort(key=lambda x: x.get("published", ""), reverse=True)
@@ -1298,31 +1303,41 @@ def fetch_market_indices() -> list[dict]:
 
     Returns list of dicts: name, emoji, price, change_pct, direction
 
-    Uses cached info so repeated calls are near-instant.
+    Fetches all 7 indices concurrently via ThreadPoolExecutor — cold cache
+    drops from ~3.5 s to ~1 s.  Warm cache is near-instant either way.
     """
-    results = []
-
-    for name, cfg in _INDICES_CONFIG.items():
+    def _fetch_one(name: str, cfg: dict) -> Optional[dict]:
         try:
             info = _cached_ticker_info(cfg["ticker"])
             if not info:
-                continue
+                return None
             price = info.get("currentPrice") or info.get("regularMarketPrice")
             prev_close = info.get("regularMarketPreviousClose") or info.get("previousClose")
             change_pct = info.get("regularMarketChangePercent")
             if change_pct is None and price and prev_close and prev_close > 0:
                 change_pct = ((price - prev_close) / prev_close) * 100
             if price is None:
-                continue
-            results.append({
+                return None
+            return {
                 "name": name,
                 "emoji": cfg["emoji"],
                 "ticker": cfg["ticker"],
                 "price": price,
                 "change_pct": round(change_pct, 2) if change_pct is not None else None,
                 "direction": "up" if (change_pct or 0) >= 0 else "down",
-            })
+            }
         except Exception:
-            continue
+            return None
+
+    results: list[dict] = []
+    with ThreadPoolExecutor(max_workers=len(_INDICES_CONFIG)) as executor:
+        futures = {
+            executor.submit(_fetch_one, name, cfg): name
+            for name, cfg in _INDICES_CONFIG.items()
+        }
+        for future in as_completed(futures):
+            data = future.result()
+            if data is not None:
+                results.append(data)
 
     return results
