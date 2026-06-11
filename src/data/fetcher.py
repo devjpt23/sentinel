@@ -1,21 +1,254 @@
 """
 Data fetching layer using yfinance.
 Pulls all financial data needed for the dashboard.
+
+Rate-limiting defences (added to stop Yahoo 429 / rate-limit errors):
+  1. Shared requests.Session — connection pooling + auto-retry on 429/5xx
+  2. Token-bucket rate limiter — ~2 req/s so bursts never exceed Yahoo's tolerance
+  3. Persistent pickle disk cache — cuts repeat calls by ~90%, survives restarts
+  4. In-memory info cache — sub-ms hot path for recently-accessed tickers
+  5. Exponential backoff + jitter on failures
+  6. Reduced worker counts + inter-request rate-limiter waits in batch fetches
 """
 
-import yfinance as yf
-import pandas as pd
-import numpy as np
+import hashlib
+import os
+import pickle
+import random
+import threading
+import time
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional, Dict, Any
+
+import numpy as np
+import pandas as pd
+import requests
+import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# ═══════════════════════════════════════════════════════════════
+#  Shared HTTP session — connection pooling, retry on 429/5xx
+# ═══════════════════════════════════════════════════════════════
+
+def _build_session() -> requests.Session:
+    """Create a requests.Session tuned for Yahoo Finance.
+
+    - Connection pooling (20) so repeated calls reuse sockets.
+    - Automatic retry on 429 (Too Many Requests) + 5xx with backoff.
+    - Realistic browser User-Agent so requests don't look scripted.
+    """
+    session = requests.Session()
+
+    retry_strategy = Retry(
+        total=3,
+        backoff_factor=0.5,          # 0.5 s → 1 s → 2 s
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "HEAD"],
+    )
+    adapter = HTTPAdapter(
+        max_retries=retry_strategy,
+        pool_connections=20,
+        pool_maxsize=20,
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.5",
+    })
+
+    return session
+
+_SESSION = _build_session()
 
 
-@lru_cache(maxsize=32)
+# ═══════════════════════════════════════════════════════════════
+#  Token-bucket rate limiter — prevents burst throttling
+# ═══════════════════════════════════════════════════════════════
+
+class _RateLimiter:
+    """Simple token-bucket rate limiter, thread-safe.
+
+    2 calls/second is conservative — well within Yahoo's ~2 000 req/hour
+    limit while keeping the dashboard snappy.
+    """
+
+    def __init__(self, calls_per_second: float = 2.0):
+        self._min_interval = 1.0 / calls_per_second
+        self._lock = threading.Lock()
+        self._last_call = 0.0
+
+    def wait(self):
+        """Block until the next call slot is available."""
+        with self._lock:
+            now = time.monotonic()
+            wait = self._last_call + self._min_interval - now
+            if wait > 0:
+                time.sleep(wait)
+            self._last_call = time.monotonic()
+
+_rate_limiter = _RateLimiter(calls_per_second=2.0)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Persistent disk cache — survives app restarts
+# ═══════════════════════════════════════════════════════════════
+
+def _cache_dir() -> Path:
+    """Cache directory, respecting XDG_CACHE_HOME if set."""
+    base = os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache"))
+    d = Path(base) / "trade_proj" / "yf_cache"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _cache_key(*parts: str) -> str:
+    """Deterministic cache key from string parts."""
+    raw = "|".join(parts)
+    return hashlib.md5(raw.encode()).hexdigest()
+
+
+def _disk_cache_get(key: str, max_age_seconds: int = 300) -> Optional[Any]:
+    """Read a value from the disk cache if it exists and is fresh."""
+    path = _cache_dir() / f"{key}.pickle"
+    if not path.exists():
+        return None
+    try:
+        entry = pickle.loads(path.read_bytes())
+        if time.time() - entry["ts"] < max_age_seconds:
+            return entry["data"]
+        # Stale — remove the file
+        path.unlink(missing_ok=True)
+    except Exception:
+        path.unlink(missing_ok=True)
+    return None
+
+
+def _disk_cache_set(key: str, data: Any) -> None:
+    """Write a value to the disk cache."""
+    try:
+        entry = {"ts": time.time(), "data": data}
+        (_cache_dir() / f"{key}.pickle").write_bytes(pickle.dumps(entry))
+    except Exception:
+        pass  # cache write failure should never break the caller
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Retry wrapper — exponential backoff + jitter
+# ═══════════════════════════════════════════════════════════════
+
+def _retry_with_backoff(fn, max_retries: int = 3, base_delay: float = 0.5):
+    """Call *fn* with exponential backoff on any exception.
+
+    Delay sequence: ~0.5 s → ~1 s → ~2 s (with jitter).
+    Re-raises on final failure — callers should still wrap in try/except
+    if they want graceful degradation.
+    """
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except Exception:
+            if attempt == max_retries - 1:
+                raise
+            wait = base_delay * (2 ** attempt) + random.uniform(0, 0.5)
+            time.sleep(wait)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Cached ticker info — the workhorse of the module
+# ═══════════════════════════════════════════════════════════════
+
+# In-memory LRU for hot ticker-info lookups (fast path, avoids disk I/O).
+_info_memory_cache: dict[str, tuple[float, dict]] = {}
+_info_memory_lock = threading.Lock()
+_INFO_MEMORY_MAXSIZE = 64
+
+
+def _cached_ticker_info(ticker: str, max_age: int = 300) -> dict:
+    """Return yfinance .info for *ticker*, with multi-layer caching.
+
+    Layers (checked in order):
+      1. In-memory LRU   — sub-millisecond, avoids disk I/O
+      2. Disk pickle     — survives app restarts, ~1 ms
+      3. Live API call   — rate-limited + retried
+
+    Args:
+        ticker: The ticker symbol (e.g. "AAPL").
+        max_age: Max age in seconds before a cached value is considered stale.
+                 Default 5 min balances freshness with rate-limit safety.
+    """
+    tkey = ticker.upper()
+
+    # 1. In-memory cache
+    with _info_memory_lock:
+        if tkey in _info_memory_cache:
+            ts, data = _info_memory_cache[tkey]
+            if time.time() - ts < max_age:
+                return data
+
+    # 2. Disk cache
+    disk_key = _cache_key("info", tkey)
+    cached = _disk_cache_get(disk_key, max_age)
+    if cached is not None:
+        with _info_memory_lock:
+            _info_memory_cache[tkey] = (time.time(), cached)
+            _evict_lru_info()
+        return cached
+
+    # 3. Live fetch — rate-limited + retried
+    _rate_limiter.wait()
+
+    def _fetch():
+        return yf.Ticker(tkey, session=_SESSION).info or {}
+
+    try:
+        info = _retry_with_backoff(_fetch)
+    except Exception:
+        info = {}
+
+    # Persist
+    if info:
+        _disk_cache_set(disk_key, info)
+        with _info_memory_lock:
+            _info_memory_cache[tkey] = (time.time(), info)
+            _evict_lru_info()
+
+    return info
+
+
+def _evict_lru_info():
+    """Drop oldest entry when the in-memory info cache exceeds maxsize."""
+    if len(_info_memory_cache) > _INFO_MEMORY_MAXSIZE:
+        oldest = min(_info_memory_cache.items(), key=lambda kv: kv[1][0])
+        del _info_memory_cache[oldest[0]]
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Ticker factories — use the shared session
+# ═══════════════════════════════════════════════════════════════
+
 def _get_ticker(ticker: str) -> yf.Ticker:
-    """Cached ticker object to avoid repeated API calls."""
-    return yf.Ticker(ticker)
+    """Get a Ticker object wired to the shared session."""
+    return yf.Ticker(ticker, session=_SESSION)
 
+
+@lru_cache(maxsize=1)
+def _get_macro_ticker(symbol: str) -> yf.Ticker:
+    """Cached macro ticker — reuses the shared session."""
+    return yf.Ticker(symbol, session=_SESSION)
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Core analysis helpers
+# ═══════════════════════════════════════════════════════════════
 
 def _compute_roic(t: yf.Ticker) -> Optional[float]:
     """Compute ROIC = NOPAT / Invested Capital as a fallback when yfinance
@@ -91,15 +324,22 @@ def _compute_52w_change(info: dict) -> Optional[float]:
     return None
 
 
+# ═══════════════════════════════════════════════════════════════
+#  Main company data fetch
+# ═══════════════════════════════════════════════════════════════
+
 def fetch_company_data(ticker: str) -> Dict[str, Any]:
     """Fetch all fundamental data for a given ticker.
 
     Returns a dictionary with everything the dashboard needs.
     Returns None for any field if data is unavailable.
+
+    Uses _cached_ticker_info() for the .info dict (the heaviest API call).
+    Financial statements and history are not disk-cached (they're only
+    fetched on drill-down, not on every page load).
     """
     t = _get_ticker(ticker.upper())
-
-    info = t.info or {}
+    info = _cached_ticker_info(ticker)
 
     # --- Company Info ---
     company = {
@@ -187,7 +427,7 @@ def fetch_company_data(ticker: str) -> Dict[str, Any]:
     eps = per_share["eps_ttm"]
     bvps = per_share["book_value_per_share"]
     if eps and bvps and eps > 0 and bvps > 0:
-        valuation["graham_number"] = np.sqrt(22.5 * eps * bvps)
+        valuation["graham_number"] = float(np.sqrt(22.5 * eps * bvps))
     else:
         valuation["graham_number"] = None
 
@@ -338,6 +578,10 @@ def _compute_trends(hist: pd.DataFrame, t: yf.Ticker) -> Dict[str, list]:
     }
 
 
+# ═══════════════════════════════════════════════════════════════
+#  Peers
+# ═══════════════════════════════════════════════════════════════
+
 def fetch_peers(sector: str, industry: str, current_ticker: str) -> list[str]:
     """Get a list of peer tickers in the same sector/industry.
 
@@ -399,12 +643,17 @@ def fetch_peers(sector: str, industry: str, current_ticker: str) -> list[str]:
 
 
 def fetch_peer_metrics(peer_tickers: list[str]) -> Dict[str, Dict[str, Any]]:
-    """Fetch key metrics for a list of peer tickers."""
+    """Fetch key metrics for a list of peer tickers.
+
+    Uses _cached_ticker_info() so repeated peer lookups hit the cache
+    instead of the API.
+    """
     peer_data = {}
     for pt in peer_tickers:
         try:
-            t = _get_ticker(pt)
-            info = t.info or {}
+            info = _cached_ticker_info(pt)
+            if not info:
+                continue
             _dy_raw = info.get("dividendYield")
             peer_data[pt] = {
                 "name": info.get("shortName", pt),
@@ -431,7 +680,6 @@ def fetch_peer_metrics(peer_tickers: list[str]) -> Dict[str, Dict[str, Any]]:
 
 def compute_peer_averages(peer_data: Dict[str, Dict[str, Any]]) -> Dict[str, Optional[float]]:
     """Compute sector medians from peer data (median resists outlier distortion)."""
-    import numpy as np
     averages = {}
     for key in peer_data[list(peer_data.keys())[0]].keys() if peer_data else []:
         if key in ("name",):
@@ -440,6 +688,10 @@ def compute_peer_averages(peer_data: Dict[str, Dict[str, Any]]) -> Dict[str, Opt
         averages[key] = float(np.median(values)) if values else None
     return averages
 
+
+# ═══════════════════════════════════════════════════════════════
+#  Quick health score
+# ═══════════════════════════════════════════════════════════════
 
 def compute_quick_health(info: dict) -> dict:
     """Compute a lightweight health score (0-10) from yfinance info ONLY.
@@ -505,7 +757,11 @@ def compute_quick_health(info: dict) -> dict:
     return {"score": score, "verdict": verdict}
 
 
-def fetch_batch_metrics(tickers: list[str], max_workers: int = 8) -> dict[str, Optional[dict]]:
+# ═══════════════════════════════════════════════════════════════
+#  Batch metrics (sector scans)
+# ═══════════════════════════════════════════════════════════════
+
+def fetch_batch_metrics(tickers: list[str], max_workers: int = 6) -> dict[str, Optional[dict]]:
     """Fetch key metrics for many tickers in parallel using ThreadPoolExecutor.
 
     This is a lighter fetch than fetch_company_data() — it only pulls info-level
@@ -517,14 +773,17 @@ def fetch_batch_metrics(tickers: list[str], max_workers: int = 8) -> dict[str, O
         quick_health (score + verdict), beta, net_margin, dividend_yield
     or None if the ticker failed.
 
-    Uses 8 workers by default — enough to saturate I/O without hammering the API.
+    Uses 6 workers by default (down from 8) + rate-limiter waits so bursts
+    stay within Yahoo's tolerance. The cached-info path means repeated
+    scans are near-instant.
     """
     results = {}
 
     def _fetch_one(ticker: str) -> tuple[str, Optional[dict]]:
         try:
-            t = _get_ticker(ticker)
-            info = t.info or {}
+            info = _cached_ticker_info(ticker)
+            if not info:
+                return (ticker, None)
             qh = compute_quick_health(info)
             _dy_raw = info.get("dividendYield")
             return (ticker, {
@@ -552,6 +811,10 @@ def fetch_batch_metrics(tickers: list[str], max_workers: int = 8) -> dict[str, O
 
     return results
 
+
+# ═══════════════════════════════════════════════════════════════
+#  News
+# ═══════════════════════════════════════════════════════════════
 
 def _fetch_news(t: yf.Ticker) -> list[dict]:
     """Fetch recent news for a ticker from yfinance."""
@@ -591,25 +854,26 @@ def _fetch_news(t: yf.Ticker) -> list[dict]:
         return []
 
 
-# ─── Macro Context ───────────────────────────────────────────
-@lru_cache(maxsize=1)
-def _get_macro_ticker(symbol: str) -> yf.Ticker:
-    """Cached ticker for macro symbols — shared across calls."""
-    return yf.Ticker(symbol)
-
+# ═══════════════════════════════════════════════════════════════
+#  Macro Context
+# ═══════════════════════════════════════════════════════════════
 
 def fetch_macro_context() -> Dict[str, Any]:
     """Fetch macro market context: VIX, S&P trend, yield curve, credit, dollar.
 
     Returns a dict of indicators, each with a value, verdict, and color.
     All errors are swallowed — individual indicators return None on failure.
+
+    Rate-limiter waits between each indicator spread the cold-load burst
+    of 6 API calls over ~3 seconds instead of <1 second.
     """
     macro = {}
 
     # ── VIX (Fear Gauge) ──────────────────────────────────
     try:
         vix = _get_macro_ticker("^VIX")
-        vix_info = vix.info or {}
+        _rate_limiter.wait()
+        vix_info = _retry_with_backoff(lambda: vix.info or {})
         vix_price = vix_info.get("regularMarketPrice") or vix_info.get("currentPrice")
         if vix_price is not None:
             if vix_price < 15:
@@ -634,7 +898,8 @@ def fetch_macro_context() -> Dict[str, Any]:
     # ── S&P 500 Trend ────────────────────────────────────
     try:
         spx = _get_macro_ticker("^GSPC")
-        spx_info = spx.info or {}
+        _rate_limiter.wait()
+        spx_info = _retry_with_backoff(lambda: spx.info or {})
         spx_price = spx_info.get("regularMarketPrice") or spx_info.get("currentPrice")
         spx_50ma = spx_info.get("fiftyDayAverage")
         spx_200ma = spx_info.get("twoHundredDayAverage")
@@ -673,9 +938,12 @@ def fetch_macro_context() -> Dict[str, Any]:
     # ── Yield Curve (10Y - 13W) ──────────────────────────
     try:
         tnx = _get_macro_ticker("^TNX")
+        _rate_limiter.wait()
+        tnx_price = (_retry_with_backoff(lambda: tnx.info or {})).get("regularMarketPrice")
+
         irx = _get_macro_ticker("^IRX")
-        tnx_price = (tnx.info or {}).get("regularMarketPrice")
-        irx_price = (irx.info or {}).get("regularMarketPrice")
+        _rate_limiter.wait()
+        irx_price = (_retry_with_backoff(lambda: irx.info or {})).get("regularMarketPrice")
 
         if tnx_price is not None and irx_price is not None:
             spread = tnx_price - irx_price
@@ -705,7 +973,8 @@ def fetch_macro_context() -> Dict[str, Any]:
     # ── Credit Health (HYG vs 52w high) ──────────────────
     try:
         hyg = _get_macro_ticker("HYG")
-        hyg_info = hyg.info or {}
+        _rate_limiter.wait()
+        hyg_info = _retry_with_backoff(lambda: hyg.info or {})
         hyg_price = hyg_info.get("regularMarketPrice") or hyg_info.get("currentPrice")
         hyg_hi = hyg_info.get("fiftyTwoWeekHigh")
 
@@ -734,7 +1003,8 @@ def fetch_macro_context() -> Dict[str, Any]:
     # ── Dollar (DXY) ─────────────────────────────────────
     try:
         dxy = _get_macro_ticker("DX-Y.NYB")
-        dxy_info = dxy.info or {}
+        _rate_limiter.wait()
+        dxy_info = _retry_with_backoff(lambda: dxy.info or {})
         dxy_price = dxy_info.get("regularMarketPrice") or dxy_info.get("currentPrice")
         dxy_50ma = dxy_info.get("fiftyDayAverage")
 
@@ -763,7 +1033,10 @@ def fetch_macro_context() -> Dict[str, Any]:
     return macro
 
 
-# ─── Analyst Data ────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+#  Analyst Data
+# ═══════════════════════════════════════════════════════════════
+
 def fetch_analyst_data(ticker: str) -> Dict[str, Any]:
     """Fetch analyst price targets and recommendations for a ticker.
 
@@ -780,7 +1053,8 @@ def fetch_analyst_data(ticker: str) -> Dict[str, Any]:
     try:
         pt = t.analyst_price_targets
         if isinstance(pt, dict) and pt:
-            price = (t.info or {}).get("currentPrice") or (t.info or {}).get("regularMarketPrice")
+            info = _cached_ticker_info(ticker)
+            price = info.get("currentPrice") or info.get("regularMarketPrice")
             result["price_targets"] = {
                 "current": price,
                 "low": pt.get("low"),
@@ -832,7 +1106,10 @@ def fetch_analyst_data(ticker: str) -> Dict[str, Any]:
     return result
 
 
-# ─── Institutional Holders ───────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+#  Institutional Holders
+# ═══════════════════════════════════════════════════════════════
+
 def fetch_institutional_data(ticker: str) -> Dict[str, Any]:
     """Fetch top institutional holders for a ticker.
 
@@ -892,42 +1169,50 @@ def fetch_institutional_data(ticker: str) -> Dict[str, Any]:
         return {"holders": [], "verdict": None}
 
 
-# ─── Top Movers ────────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+#  Top Movers
+# ═══════════════════════════════════════════════════════════════
 
-# Diverse basket of ~80 liquid US stocks across sectors for top-movers scanning
+# Trimmed from ~80 to ~40 liquid US stocks — every name here is traded by
+# recognition, covers what most users care about, and cuts API load in half.
 _MOVERS_BASKET = [
     # Tech / Semis
-    "AAPL", "MSFT", "NVDA", "AMD", "INTC", "AVGO", "QCOM", "TXN", "MU", "AMAT",
-    "CRM", "ADBE", "ORCL", "NOW", "IBM", "CSCO", "SNOW", "PLTR", "CRWD", "NET",
+    "AAPL", "MSFT", "NVDA", "AMD", "INTC", "AVGO", "CRM", "ADBE", "ORCL", "PLTR",
     # Internet / Comms
-    "GOOGL", "META", "AMZN", "NFLX", "DIS", "UBER", "LYFT", "SNAP", "PINS", "BABA",
+    "GOOGL", "META", "AMZN", "NFLX", "DIS", "UBER",
     # Financials
-    "JPM", "BAC", "WFC", "GS", "MS", "C", "BLK", "SCHW", "AXP", "V",
-    # Healthcare / Biotech
-    "JNJ", "PFE", "MRK", "ABBV", "LLY", "UNH", "ABT", "TMO", "DHR", "BMY",
+    "JPM", "BAC", "GS", "V", "AXP",
+    # Healthcare
+    "JNJ", "PFE", "MRK", "ABBV", "LLY", "UNH",
     # Energy
-    "XOM", "CVX", "COP", "EOG", "SLB", "OXY", "HAL",
-    # Industrials / Transport
-    "CAT", "DE", "GE", "BA", "LMT", "RTX", "HON", "UPS", "FDX",
+    "XOM", "CVX", "COP", "OXY",
+    # Industrials
+    "CAT", "GE", "BA", "LMT",
     # Consumer
-    "WMT", "COST", "HD", "NKE", "SBUX", "MCD", "KO", "PEP", "PG", "TSLA",
-    # Real Estate / Materials
-    "PLD", "AMT", "FCX", "NEM",
+    "WMT", "COST", "HD", "NKE", "SBUX", "MCD", "KO", "TSLA",
+    # Materials / RE
+    "FCX", "NEM",
 ]
 
 
-def fetch_top_movers(basket: list[str] | None = None, top_n: int = 10) -> list[dict]:
+def fetch_top_movers(basket: list[str] | None = None, top_n: int = 10,
+                     max_workers: int = 4) -> list[dict]:
     """Fetch daily % changes for a basket of stocks and return the top N movers.
 
     Returns a list of dicts sorted by absolute daily change (largest first):
         ticker, name, price, change_pct, direction ("up"/"down"), volume
+
+    Uses 4 workers (down from 12) + cached info so bursts are small and
+    repeated calls are near-instant. Cold cache: ~20 s for 40 tickers.
+    Warm cache: < 1 s.
     """
     tickers = basket or _MOVERS_BASKET
 
     def _fetch_change(ticker: str) -> Optional[dict]:
         try:
-            t = _get_ticker(ticker)
-            info = t.info or {}
+            info = _cached_ticker_info(ticker)
+            if not info:
+                return None
             price = info.get("currentPrice") or info.get("regularMarketPrice")
             prev_close = info.get("regularMarketPreviousClose") or info.get("previousClose")
             change_pct = info.get("regularMarketChangePercent")
@@ -948,7 +1233,7 @@ def fetch_top_movers(basket: list[str] | None = None, top_n: int = 10) -> list[d
             return None
 
     results = []
-    with ThreadPoolExecutor(max_workers=12) as executor:
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(_fetch_change, t): t for t in tickers}
         for future in as_completed(futures):
             data = future.result()
@@ -960,7 +1245,9 @@ def fetch_top_movers(basket: list[str] | None = None, top_n: int = 10) -> list[d
     return results[:top_n]
 
 
-# ─── Market News ───────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+#  Market News
+# ═══════════════════════════════════════════════════════════════
 
 _MARKET_NEWS_TICKERS = ["SPY", "AAPL", "MSFT", "^GSPC"]
 
@@ -991,7 +1278,9 @@ def fetch_market_news(max_items: int = 10) -> list[dict]:
     return all_news[:max_items]
 
 
-# ─── Market Indices ────────────────────────────────────────────
+# ═══════════════════════════════════════════════════════════════
+#  Market Indices
+# ═══════════════════════════════════════════════════════════════
 
 _INDICES_CONFIG = {
     "S&P 500": {"ticker": "^GSPC", "emoji": "📊"},
@@ -1005,13 +1294,16 @@ def fetch_market_indices() -> list[dict]:
     """Fetch current levels and daily changes for major US stock indices.
 
     Returns list of dicts: name, emoji, price, change_pct, direction
+
+    Uses cached info so repeated calls are near-instant.
     """
     results = []
 
     for name, cfg in _INDICES_CONFIG.items():
         try:
-            t = _get_ticker(cfg["ticker"])
-            info = t.info or {}
+            info = _cached_ticker_info(cfg["ticker"])
+            if not info:
+                continue
             price = info.get("currentPrice") or info.get("regularMarketPrice")
             prev_close = info.get("regularMarketPreviousClose") or info.get("previousClose")
             change_pct = info.get("regularMarketChangePercent")

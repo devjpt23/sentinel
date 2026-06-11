@@ -1155,13 +1155,31 @@ if page == "🏠 Dashboard":
         )
         st.stop()
 
-    # Fetch data
+    # Fetch data (with retry for transient Yahoo Finance issues)
     with st.spinner(f"Analyzing {ticker}..."):
-        try:
-            data = fetch_company_data(ticker)
-        except Exception as e:
-            st.error(f"Could not fetch data for {ticker}. Check the ticker symbol and try again.")
-            st.stop()
+        data = None
+        for attempt in range(3):
+            try:
+                data = fetch_company_data(ticker)
+                break  # success
+            except Exception as e:
+                import traceback
+                print(f"[Sentinel] Attempt {attempt+1}/3 failed for {ticker}: {e}")
+                traceback.print_exc()
+                if attempt < 2:
+                    import time
+                    time.sleep(1.5 * (attempt + 1))  # 1.5s, 3s backoff
+                else:
+                    st.error(
+                        f"Could not fetch data for {ticker} after 3 attempts. "
+                        f"This is usually a temporary issue with the data provider. "
+                        f"Please try again. ({e})"
+                    )
+                    st.stop()
+
+    if data is None:
+        st.error(f"Could not fetch data for {ticker}. Check the ticker symbol and try again.")
+        st.stop()
 
     company = data.get("company", {})
     if not company.get("name"):
