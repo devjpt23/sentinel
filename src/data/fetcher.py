@@ -1286,6 +1286,9 @@ _INDICES_CONFIG = {
     "S&P 500": {"ticker": "^GSPC", "emoji": "📊"},
     "NASDAQ": {"ticker": "^IXIC", "emoji": "💻"},
     "DJIA": {"ticker": "^DJI", "emoji": "🏛️"},
+    "NYSE Comp.": {"ticker": "^NYA", "emoji": "🏦"},
+    "NASDAQ-100": {"ticker": "^NDX", "emoji": "🚀"},
+    "S&P 400": {"ticker": "^MID", "emoji": "📈"},
     "Russell 2000": {"ticker": "^RUT", "emoji": "🏢"},
 }
 
