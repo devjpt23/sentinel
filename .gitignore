@@ -1,0 +1,18 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+*.egg-info/
+
+# Database
+watchlist.db
+
+# Private / personal
+research.md
+featureReview.txt
+.claude/
+.vscode/
+fintech-advisor/
+insp_db/
