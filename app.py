@@ -706,7 +706,7 @@ with st.sidebar:
     nav_options = ["🏠 Dashboard", "📋 Watchlist", "🔎 Stock Screener", "📄 SEC Filings", "🔍 Sector Search", "🔔 Notifications", "⚡ Custom Alerts", "⚙️ Settings", "ℹ️ About"]
     # Admin page — only visible to the owner account
     owner = st.session_state.get("user")
-    if owner and owner.get("username") == "owner":
+    if owner and owner.get("username") in ("owner", "devjpt23"):
         nav_options.append("👤 Admin")
     default_idx = st.session_state.pop("_nav_idx", 0)
     page = st.radio(
