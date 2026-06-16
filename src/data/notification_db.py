@@ -151,32 +151,6 @@ def init_notification_db() -> None:
         conn.execute("ALTER TABLE notification_preferences ADD COLUMN telegram_bot_token TEXT")
     except sqlite3.OperationalError:
         pass  # column already exists
-    # Migration: add ntfy columns for push notification support
-    try:
-        conn.execute("ALTER TABLE notification_preferences ADD COLUMN ntfy_topic TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        conn.execute("ALTER TABLE notification_preferences ADD COLUMN ntfy_enabled BOOLEAN DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        conn.execute("ALTER TABLE notification_preferences ADD COLUMN ntfy_write_token TEXT")
-    except sqlite3.OperationalError:
-        pass
-    # Migration: add Gmail columns for email notification support
-    try:
-        conn.execute("ALTER TABLE notification_preferences ADD COLUMN gmail_enabled BOOLEAN DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        conn.execute("ALTER TABLE notification_preferences ADD COLUMN gmail_sender TEXT")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        conn.execute("ALTER TABLE notification_preferences ADD COLUMN gmail_app_password TEXT")
-    except sqlite3.OperationalError:
-        pass
     conn.commit()
     conn.close()
 
@@ -236,59 +210,6 @@ def get_user_bot_tokens() -> List[Dict]:
     return [dict(r) for r in rows]
 
 
-def get_user_ntfy_configs() -> List[Dict]:
-    """Return all users who have ntfy push notifications enabled.
-
-    Returns list of dicts with keys: user_id, ntfy_topic, ntfy_write_token.
-    Only returns users where ntfy_topic is set and ntfy is enabled.
-
-    Used by the scheduler and CLI to know which users to deliver ntfy alerts to.
-    """
-    conn = _get_conn()
-    rows = conn.execute(
-        """SELECT user_id, ntfy_topic, ntfy_write_token
-           FROM notification_preferences
-           WHERE ntfy_topic IS NOT NULL
-             AND ntfy_topic != ''
-             AND ntfy_enabled = 1"""
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-def get_user_gmail_configs() -> List[Dict]:
-    """Return all users who have Gmail notifications enabled.
-
-    Returns list of dicts with keys: user_id, gmail_sender, gmail_app_password.
-    Also includes the user's email from the users table as the recipient.
-
-    Only returns users where gmail is enabled AND either per-user credentials
-    are set OR the global default sender is available.
-    """
-    conn = _get_conn()
-    rows = conn.execute(
-        """SELECT np.user_id, np.gmail_sender, np.gmail_app_password, u.email
-           FROM notification_preferences np
-           JOIN users u ON u.id = np.user_id
-           WHERE np.gmail_enabled = 1"""
-    ).fetchall()
-    conn.close()
-
-    from src.notifications.gmail_sender import get_default_sender
-    default_sender = get_default_sender()
-
-    configs = []
-    for r in rows:
-        d = dict(r)
-        # Use per-user credentials if set, otherwise fall back to default
-        sender = d.get("gmail_sender") or default_sender
-        if not sender or not d.get("email"):
-            continue  # can't send without a sender and recipient
-        d["effective_sender"] = sender
-        d["recipient_email"] = d["email"]
-        configs.append(d)
-
-    return configs
 
 
 def set_preferences(user_id: int, **kwargs) -> None:

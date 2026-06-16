@@ -27,15 +27,6 @@ from src.notifications.telegram_bot import (
     send_telegram_message,
     format_telegram_notification,
 )
-from src.notifications.ntfy_sender import (
-    send_ntfy_message,
-    format_ntfy_notification,
-)
-from src.notifications.gmail_sender import (
-    send_gmail_message,
-    format_email_notification,
-    is_available as gmail_is_available,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -150,13 +141,10 @@ def check_all_tickers_for_user(user_id: int) -> Dict[str, List[Dict]]:
 
 
 def deliver_notifications(user_id: int, notifications_by_ticker: Dict[str, List[Dict]]) -> int:
-    """Deliver all notifications via enabled channels. Returns total delivered count.
+    """Deliver all notifications via Telegram. Returns total delivered count.
 
     Each notification is always stored in-app (DB). Delivery is attempted via
-    Telegram and/or ntfy if the user has configured and enabled them.
-
-    Both channels run in parallel — a user can receive alerts on both Telegram
-    and ntfy simultaneously during the transition period.
+    Telegram if the user has configured and enabled it.
     """
     prefs = get_preferences(user_id)
     delivered = 0
@@ -169,17 +157,8 @@ def deliver_notifications(user_id: int, notifications_by_ticker: Dict[str, List[
         and bool(bot_token)
     )
 
-    # ── ntfy channel ────────────────────────────────────────
-    ntfy_topic = prefs.get("ntfy_topic", "")
-    ntfy_enabled = (
-        bool(prefs.get("ntfy_enabled"))
-        and bool(ntfy_topic)
-    )
-    ntfy_write_token = prefs.get("ntfy_write_token", "")
-
     for _ticker, notifications in notifications_by_ticker.items():
         for n in notifications:
-            # Telegram delivery
             if telegram_enabled:
                 try:
                     text = format_telegram_notification(n)
@@ -191,63 +170,6 @@ def deliver_notifications(user_id: int, notifications_by_ticker: Dict[str, List[
                         delivered += 1
                 except Exception as e:
                     logger.warning(f"Telegram delivery failed for notification {n.get('id')}: {e}")
-
-            # ntfy delivery (runs in parallel with Telegram — both can deliver)
-            if ntfy_enabled:
-                try:
-                    ticker = n.get("ticker", "")
-                    text = format_ntfy_notification(n)
-                    # Map severity to ntfy priority
-                    severity = n.get("severity", "info")
-                    priority_map = {
-                        "critical": "max",
-                        "warning": "high",
-                        "info": "default",
-                    }
-                    priority = priority_map.get(severity, "default")
-                    # Build a clean ASCII title for the phone notification
-                    # (HTTP headers must be latin-1, so strip emoji/unicode from title)
-                    raw_title = n.get('title', 'Alert')
-                    # Remove emoji and other non-ASCII chars for the Title header
-                    ascii_title = raw_title.encode('ascii', errors='ignore').decode('ascii').strip()
-                    title = f"{ticker} - {ascii_title}"
-                    # Use ticker as tag for quick glance context
-                    sent = send_ntfy_message(
-                        topic=ntfy_topic,
-                        text=text,
-                        title=title,
-                        priority=priority,
-                        tags=ticker,
-                        write_token=ntfy_write_token,
-                    )
-                    if sent:
-                        mark_delivered(n["id"], "ntfy")
-                        delivered += 1
-                except Exception as e:
-                    logger.warning(f"ntfy delivery failed for notification {n.get('id')}: {e}")
-
-            # ── Gmail Email channel ──────────────────────────
-            if gmail_is_available() and prefs.get("gmail_enabled"):
-                # Get the user's email address as the recipient
-                user_email = prefs.get("email") or prefs.get("gmail_sender")
-                if user_email:
-                    try:
-                        html_body, subject = format_email_notification(n)
-                        # Per-user credentials take priority over defaults
-                        per_user_sender = prefs.get("gmail_sender", "")
-                        per_user_password = prefs.get("gmail_app_password", "")
-                        sent = send_gmail_message(
-                            to_email=user_email,
-                            subject=subject,
-                            html_body=html_body,
-                            from_email=per_user_sender,
-                            app_password=per_user_password,
-                        )
-                        if sent:
-                            mark_delivered(n["id"], "gmail")
-                            delivered += 1
-                    except Exception as e:
-                        logger.warning(f"Gmail delivery failed for notification {n.get('id')}: {e}")
 
     return delivered
 

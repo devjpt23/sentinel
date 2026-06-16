@@ -2,17 +2,15 @@
 Standalone notification checker CLI.
 
 Runs notification checks for one or all users and optionally delivers
-via Telegram and/or ntfy push. Designed for cron-based fallback when the
+via Telegram. Designed for cron-based fallback when the
 in-process APScheduler isn't running (e.g., separate machine, system cron backup).
 
 Usage:
     python -m src.cli.sentinel_notify --user trader1
     python -m src.cli.sentinel_notify --all --telegram
-    python -m src.cli.sentinel_notify --all --ntfy
-    python -m src.cli.sentinel_notify --user trader1 --telegram --ntfy
 
 Cron example (weekdays at 8 AM):
-    0 8 * * 1-5 /path/to/.venv/bin/python -m src.cli.sentinel_notify --all --ntfy
+    0 8 * * 1-5 /path/to/.venv/bin/python -m src.cli.sentinel_notify --all --telegram
 """
 
 import argparse
@@ -47,9 +45,6 @@ def main():
     )
     parser.add_argument(
         "--telegram", action="store_true", help="Deliver notifications via Telegram"
-    )
-    parser.add_argument(
-        "--ntfy", action="store_true", help="Deliver notifications via ntfy push"
     )
     parser.add_argument(
         "--verbose", "-v", action="store_true", help="Show per-ticker progress"
@@ -111,8 +106,8 @@ def main():
                 if args.verbose:
                     print(f"error: {e}")
 
-        # Deliver via enabled channels
-        if notifications_by_ticker and (args.telegram or args.ntfy):
+        # Deliver via Telegram if enabled
+        if notifications_by_ticker and args.telegram:
             delivered = deliver_notifications(user["id"], notifications_by_ticker)
             total_delivered += delivered
 
@@ -124,28 +119,17 @@ def main():
 
         if notifications_by_ticker:
             ticker_list = ", ".join(notifications_by_ticker.keys())
-            channels = []
-            if args.telegram:
-                channels.append("Telegram")
-            if args.ntfy:
-                channels.append("ntfy")
-            channel_str = " + ".join(channels) if channels else ""
             print(
                 f"User '{user['username']}': {len(notifications_by_ticker)} ticker(s) with changes "
                 f"({ticker_list}), {total_notifications} notification(s)"
-                + (f", {total_delivered} delivered via {channel_str}" if channel_str else "")
+                + (f", {total_delivered} delivered via Telegram" if total_delivered else "")
             )
         elif args.verbose:
             print(f"User '{user['username']}': no changes detected.")
 
     print(f"\nTotal: {total_notifications} notification(s) across {len(users)} user(s).")
-    if args.telegram or args.ntfy:
-        channels = []
-        if args.telegram:
-            channels.append("Telegram")
-        if args.ntfy:
-            channels.append("ntfy")
-        print(f"Delivered: {total_delivered} message(s) via {' + '.join(channels)}.")
+    if args.telegram:
+        print(f"Delivered: {total_delivered} message(s) via Telegram.")
 
 
 if __name__ == "__main__":

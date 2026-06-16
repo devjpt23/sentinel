@@ -27,13 +27,6 @@ from src.data.notification_db import (
     mark_all_read,
     dismiss_notification,
 )
-from src.notifications.ntfy_sender import (
-    generate_ntfy_topic,
-    generate_write_token,
-    send_ntfy_test_message,
-    send_ntfy_message,
-    format_ntfy_welcome,
-)
 from src.notifications.telegram_bot import (
     discover_chat_id,
     send_test_message as send_telegram_test,
@@ -348,22 +341,6 @@ def render_notification_preferences() -> None:
         )
         new_prefs["check_interval_hours"] = interval
 
-        # ntfy push status (quick view — full setup on Settings page)
-        st.markdown('<p style="color: #E6EDF3; font-size: 0.8rem; margin-top: 12px;">📱 Push Notifications</p>',
-                    unsafe_allow_html=True)
-
-        ntfy_topic = prefs.get("ntfy_topic", "")
-        has_ntfy = bool(ntfy_topic)
-
-        if has_ntfy:
-            ntfy_on = st.checkbox("Send alerts to phone",
-                                  value=bool(prefs.get("ntfy_enabled", 0)),
-                                  key="pref_ntfy")
-            new_prefs["ntfy_enabled"] = 1 if ntfy_on else 0
-            st.success("✅ Push notifications connected")
-        else:
-            st.info("Go to ⚙️ **Settings** to set up push notifications.")
-
         # ── Telegram notifications ────────────────────────
         telegram_bot_token = prefs.get("telegram_bot_token", "")
         telegram_chat_id = prefs.get("telegram_chat_id", "")
@@ -380,27 +357,6 @@ def render_notification_preferences() -> None:
             st.success("✅ Telegram connected")
         else:
             st.info("Go to ⚙️ **Settings** to connect Telegram.")
-
-        # ── Email notifications ─────────────────────────
-        st.markdown('<p style="color: #E6EDF3; font-size: 0.8rem; margin-top: 12px;">📧 Email Alerts</p>',
-                    unsafe_allow_html=True)
-
-        has_gmail = bool(prefs.get("gmail_sender", ""))
-        global_gmail = False
-        try:
-            from src.notifications.gmail_sender import get_default_sender
-            global_gmail = bool(get_default_sender())
-        except Exception:
-            pass
-
-        if has_gmail or global_gmail:
-            gmail_on = st.checkbox("Send alerts to email",
-                                   value=bool(prefs.get("gmail_enabled", 0)),
-                                   key="pref_gmail")
-            new_prefs["gmail_enabled"] = 1 if gmail_on else 0
-            st.success("✅ Email notifications configured")
-        else:
-            st.info("Go to ⚙️ **Settings** to set up email alerts.")
 
         if st.button("Save Settings", use_container_width=True, key="save_prefs"):
             set_preferences(user["id"], **new_prefs)
@@ -449,20 +405,6 @@ def render_notification_list() -> None:
 
 # ─── Settings Page ───────────────────────────────────────────
 
-def _send_ntfy_welcome(user_id: int, topic: str, write_token: str) -> None:
-    """Send a welcome push notification listing the user's watchlist tickers."""
-    from src.data.watchlist_db import load_user_watchlist
-    tickers = load_user_watchlist(user_id)
-    message = format_ntfy_welcome(tickers)
-    send_ntfy_message(
-        topic=topic,
-        text=message,
-        priority="default",
-        tags="white_check_mark",
-        write_token=write_token,
-    )
-
-
 def render_settings_page() -> None:
     """Render the full Settings page with Telegram setup and notification prefs.
 
@@ -478,196 +420,6 @@ def render_settings_page() -> None:
         return
 
     prefs = get_preferences(user["id"])
-    ntfy_topic = prefs.get("ntfy_topic", "")
-    ntfy_token = prefs.get("ntfy_write_token", "")
-    has_ntfy = bool(ntfy_topic)
-    gmail_sender = prefs.get("gmail_sender", "")
-    gmail_app_pw = prefs.get("gmail_app_password", "")
-    has_per_user_gmail = bool(gmail_sender and gmail_app_pw)
-
-    # Check global default Gmail
-    global_gmail = False
-    try:
-        from src.notifications.gmail_sender import get_default_sender
-        global_gmail = bool(get_default_sender())
-    except Exception:
-        pass
-    gmail_available = has_per_user_gmail or global_gmail
-
-    new_prefs: dict = {}
-
-    # ─── Section 1: Push Notifications ──────────────────
-    st.markdown("---")
-    st.markdown("### 📱 Push Notifications")
-    st.markdown(
-        "Get alerted on your phone when your watched stocks have meaningful changes. "
-        "Uses ntfy — a free, open-source push notification service. "
-        "Download the ntfy app on [iOS](https://apps.apple.com/us/app/ntfy/id1625396347) "
-        "or [Android](https://play.google.com/store/apps/details?id=io.heckel.ntfy)."
-    )
-
-    # ── STATE: Connected ────────────────────────────────
-    if has_ntfy:
-        # Build the subscription URL that the user puts into the ntfy app
-        setup_url = f"https://ntfy.sh/{ntfy_topic}"
-
-        st.success(
-            f"✅ **Connected!**\n\n"
-            f"Your push topic: `{ntfy_topic}`\n\n"
-            f"**Setup URL:** {setup_url}\n\n"
-            f"Copy this URL into the ntfy app to subscribe. "
-            f"Notifications will arrive instantly on your phone."
-        )
-
-        col_test, col_disconnect = st.columns([1, 3])
-        with col_test:
-            if st.button("📨 Send Test Alert", use_container_width=True, key="test_ntfy"):
-                if send_ntfy_test_message(topic=ntfy_topic, write_token=ntfy_token):
-                    st.success("Test message sent! Check your phone.")
-                else:
-                    st.error("Failed to send test message. Check your ntfy server connection.")
-        with col_disconnect:
-            if st.button("🗑️ Disconnect Push", use_container_width=True, key="clear_ntfy"):
-                set_preferences(
-                    user["id"],
-                    ntfy_topic="",
-                    ntfy_write_token="",
-                    ntfy_enabled=0,
-                )
-                st.success("Push notifications disconnected.")
-                st.rerun()
-
-    # ── STATE: Not connected ───────────────────────────
-    else:
-        st.markdown("""
-        **Simple setup — no BotFather, no polling, no link codes:**
-        1. Download the **ntfy** app on your phone
-        2. Click the button below to generate your unique push topic
-        3. Copy the URL into the ntfy app
-        4. Done! You'll receive alerts instantly.
-        """)
-
-        if st.button("🔔 Enable Push Notifications", use_container_width=True, key="enable_ntfy"):
-            topic = generate_ntfy_topic()
-            write_token = generate_write_token()
-            set_preferences(
-                user["id"],
-                ntfy_topic=topic,
-                ntfy_write_token=write_token,
-                ntfy_enabled=1,
-            )
-            _send_ntfy_welcome(user["id"], topic, write_token)
-            st.success("✅ Push notifications enabled! Copy the setup URL into your ntfy app.")
-            st.rerun()
-
-    # ─── Section 2: Email Notifications ──────────────────
-    st.markdown("---")
-    st.markdown("### 📧 Email Alerts")
-    st.markdown(
-        "Get score change alerts delivered to your Gmail inbox. "
-        "Requires a Gmail account with 2-Factor Authentication enabled."
-    )
-
-    # ── STATE: Per-user Gmail connected ────────────────
-    if has_per_user_gmail:
-        gmail_enabled = st.checkbox(
-            "Send alerts to my email",
-            value=bool(prefs.get("gmail_enabled", 0)),
-            key="settings_gmail",
-        )
-        new_prefs["gmail_enabled"] = 1 if gmail_enabled else 0
-
-        st.success(f"✅ Sending from: `{gmail_sender}`")
-
-        col_test, col_disconnect = st.columns([1, 3])
-        with col_test:
-            if st.button("📨 Send Test Email", use_container_width=True, key="test_gmail"):
-                user_email = user.get("email") or gmail_sender
-                from src.notifications.gmail_sender import send_gmail_test_message
-                if send_gmail_test_message(
-                    to_email=user_email,
-                    from_email=gmail_sender,
-                    app_password=gmail_app_pw,
-                ):
-                    st.success(f"Test email sent! Check {user_email}")
-                else:
-                    st.error("Failed to send test email. Check your credentials.")
-        with col_disconnect:
-            if st.button("🗑️ Disconnect Email", use_container_width=True, key="clear_gmail"):
-                set_preferences(
-                    user["id"],
-                    gmail_sender="",
-                    gmail_app_password="",
-                    gmail_enabled=0,
-                )
-                st.success("Email notifications disconnected.")
-                st.rerun()
-
-    # ── STATE: Only global Gmail available ─────────────
-    elif global_gmail:
-        gmail_enabled = st.checkbox(
-            "Send alerts to my email (via global Gmail config)",
-            value=bool(prefs.get("gmail_enabled", 0)),
-            key="settings_gmail",
-            help="The app administrator has configured a default Gmail sender. "
-                 "Your alerts will be sent to the email on your account.",
-        )
-        new_prefs["gmail_enabled"] = 1 if gmail_enabled else 0
-
-        user_email = user.get("email", "")
-        if user_email:
-            st.success(f"✅ Alerts will be sent to: `{user_email}`")
-        else:
-            st.warning("⚠️ No email on your account. Add one in your profile.")
-
-    # ── STATE: No Gmail configured ────────────────────
-    else:
-        st.markdown("""
-        **Two ways to set up email alerts:**
-
-        **Option A — Use your own Gmail (recommended):**
-        1. Go to https://myaccount.google.com/apppasswords
-        2. Generate a 16-character App Password
-        3. Enter your Gmail address and App Password below
-
-        **Option B — Admin global config:**
-        The app admin can set a default sender in `.streamlit/secrets.toml`
-        under `[gmail]` — then all users get email delivery automatically.
-        """)
-
-        with st.form("gmail_setup_form"):
-            user_gmail = st.text_input(
-                "Your Gmail address",
-                key="settings_gmail_addr",
-                placeholder="yourname@gmail.com",
-            )
-            user_app_pw = st.text_input(
-                "Gmail App Password (16 characters, no spaces)",
-                type="password",
-                key="settings_gmail_pw",
-                placeholder="xxxx xxxx xxxx xxxx",
-                help="Generate at https://myaccount.google.com/apppasswords",
-            )
-            submitted = st.form_submit_button("✅ Connect Email", use_container_width=True)
-            if submitted:
-                if not user_gmail or not user_app_pw:
-                    st.error("Both fields are required.")
-                else:
-                    set_preferences(
-                        user["id"],
-                        gmail_sender=user_gmail.strip(),
-                        gmail_app_password=user_app_pw.strip(),
-                        gmail_enabled=1,
-                    )
-                    # Send welcome test
-                    from src.notifications.gmail_sender import send_gmail_test_message
-                    send_gmail_test_message(
-                        to_email=user_gmail.strip(),
-                        from_email=user_gmail.strip(),
-                        app_password=user_app_pw.strip(),
-                    )
-                    st.success(f"✅ Email connected! A test message was sent to {user_gmail}")
-                    st.rerun()
 
     # ─── Section: Telegram Notifications ──────────────────
     st.markdown("---")

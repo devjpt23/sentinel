@@ -971,8 +971,6 @@ def _cmd_prefs(bot_token: str, chat_id: str, user_id: int) -> None:
         f"  F-Score changes: {'✅' if prefs.get('fscore_change') else '❌'}",
         "",
         f"Telegram: {'✅ Connected' if prefs.get('telegram_chat_id') else '❌ Not linked'}",
-        f"ntfy: {'✅ Enabled' if prefs.get('ntfy_enabled') else '❌ Disabled'}",
-        f"Gmail: {'✅ Enabled' if prefs.get('gmail_enabled') else '❌ Disabled'}",
     ]
 
     send_telegram_message(bot_token, chat_id, "\n".join(lines))
