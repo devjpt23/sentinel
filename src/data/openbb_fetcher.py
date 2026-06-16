@@ -28,9 +28,15 @@ from typing import Optional, Dict, Any, List
 import pandas as pd
 
 try:
+    # Ensure OpenBB has writable directories for its cache and config.
+    # On restricted environments (Streamlit Cloud), ~/.openbb may be read-only.
+    _openbb_dir = Path(os.environ.get("OPENBB_CACHE_DIR", str(Path.home() / ".openbb")))
+    _openbb_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("OPENBB_CACHE_DIR", str(_openbb_dir))
+
     from openbb import obb  # noqa: F401
     OPENBB_AVAILABLE = True
-except ImportError:
+except Exception:
     obb = None  # type: ignore[misc, assignment]
     OPENBB_AVAILABLE = False
 
