@@ -41,7 +41,6 @@ Every number comes with a plain-English explanation. No finance degree required.
 | **Deep Dive** | Full financial statements, F-Score breakdown, Z-Score analysis, DCF model |
 | **Live Price Ticker** | Real-time (delayed) price with daily change |
 | **Watchlist** | Save stocks and monitor their health at a glance with a scrolling marquee |
-| **Strategy Lab** | Monte Carlo simulation — backtest buy/sell rules against 5 years of price data |
 | **Sector Search** | Browse and discover stocks within major sectors |
 | **PDF Export** | Download a formatted PDF report of any analysis |
 
@@ -84,11 +83,8 @@ sentinel/
 │   │   ├── macro_strip.py          # VIX, S&P trend, yield curve display
 │   │   ├── sentiment.py            # News sentiment analysis & institutional activity
 │   │   ├── sector_search.py        # Sector-based stock discovery
-│   │   ├── strategy_sim.py         # Strategy Lab UI (Monte Carlo simulator)
 │   │   ├── company_linkage.py      # Supply chain & competitor relationship graph
 │   │   └── pdf_report.py           # PDF report generation
-│   ├── strategy/
-│   │   └── engine.py               # Backtesting engine with technical indicators
 │   └── utils/
 │       ├── explanations.py         # Plain-English metric explanations
 │       └── formatters.py           # Number formatting utilities
@@ -145,9 +141,6 @@ The main analysis view. Enter a ticker to get the full fundamental breakdown: fo
 
 ### 📋 Watchlist
 Save stocks you're tracking and see their health scores at a glance. Each card shows current price, P/E ratio, and health verdict with a color-coded indicator. A scrolling marquee at the top of every page shows live prices for your watchlist, updating on hover.
-
-### 🎯 Strategy Lab
-A Monte Carlo simulator that backtests custom buy/sell rules against 5 years of historical price data. Configure entry conditions (RSI, SMA pullback, volume confirmation, fundamental quality filters), exit rules (profit target, stop loss, time horizon), and position sizing. Run 10,000 randomized simulations to see your win rate, average return, and return distribution.
 
 ### 🔍 Sector Search
 Browse stocks by sector with filtering by market cap and health. Discover new investment ideas without needing to know ticker symbols in advance.

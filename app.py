@@ -703,7 +703,7 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown("### Navigation")
-    nav_options = ["🏠 Dashboard", "📋 Watchlist", "🎯 Strategy Lab", "🔎 Stock Screener", "📄 SEC Filings", "🔍 Sector Search", "🔔 Notifications", "⚡ Custom Alerts", "⚙️ Settings", "ℹ️ About"]
+    nav_options = ["🏠 Dashboard", "📋 Watchlist", "🔎 Stock Screener", "📄 SEC Filings", "🔍 Sector Search", "🔔 Notifications", "⚡ Custom Alerts", "⚙️ Settings", "ℹ️ About"]
     default_idx = st.session_state.pop("_nav_idx", 0)
     page = st.radio(
         "Navigation",
@@ -1883,46 +1883,6 @@ elif page == "📋 Watchlist":
                 db_clear_watchlist()
             st.rerun()
 
-
-# ─── Strategy Lab ──────────────────────────────────────────
-elif page == "🎯 Strategy Lab":
-    from src.display.strategy_sim import render_strategy_lab
-    st.markdown('<h2 style="color: #58A6FF;">🎯 Strategy Lab</h2>', unsafe_allow_html=True)
-    st.markdown(
-        "Test and compare buy/sell strategies using historical price data. "
-        "Enter a ticker, set your rules, and run thousands of simulated trades to see "
-        "what outcomes you could expect."
-    )
-
-    lab_ticker = st.text_input(
-        "Enter a ticker to simulate",
-        placeholder="Enter a ticker to simulate (e.g., NVDA, AAPL, MU)...",
-        key="lab_ticker",
-        label_visibility="collapsed",
-    ).upper().strip()
-
-    if lab_ticker:
-        import yfinance as yf
-        with st.spinner(f"Loading {lab_ticker} price data..."):
-            t = yf.Ticker(lab_ticker)
-            lab_data = fetch_company_data(lab_ticker)
-            lab_price = t.history(period="5y")
-
-        if lab_price.empty:
-            st.error("No price data found for this ticker.")
-        else:
-            # Compute quick scores for the quality profile
-            lab_health = 50
-            lab_intrinsic = 50
-            try:
-                lab_health, _, _, _ = compute_health_score(lab_data)
-                lab_intrinsic, _, _, _, _ = compute_intrinsic_worth(lab_data)
-            except Exception:
-                pass
-
-            lab_data["health_score"] = lab_health
-            lab_data["intrinsic_score"] = lab_intrinsic
-            render_strategy_lab(lab_ticker, lab_price, lab_data)
 
 # ─── Stock Screener ──────────────────────────────────────────
 elif page == "🔎 Stock Screener":
