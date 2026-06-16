@@ -18,14 +18,7 @@ jobs:
         with:
           host: 20.38.10.149
           username: sentinel
-          key: |
-            -----BEGIN OPENSSH PRIVATE KEY-----
-            b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-            QyNTUxOQAAACCkMWKcw4J/oADpy1ekmFRHZbl5htfa8igUPbtIzlKZIQAAAJhK9mv7SvZr
-            +wAAAAtzc2gtZWQyNTUxOQAAACCkMWKcw4J/oADpy1ekmFRHZbl5htfa8igUPbtIzlKZIQ
-            AAAEDX9SmGlhW44FRKWpOWptgzHH7HV3VECQ2kW5tcmAmXWKQxYpzDgn+gAOnLV6SYVEdl
-            uXmG19ryKBQ9u0jOUpkhAAAAEmRldnBhdGVsMjMyNDhALmNvbQECAw==
-            -----END OPENSSH PRIVATE KEY-----
+          key: ${{ secrets.DEPLOY_KEY }}
           script: |
             set -euo pipefail
 
