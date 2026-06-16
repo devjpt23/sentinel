@@ -19,7 +19,7 @@ SyslogIdentifier=sentinel-daemon
 NoNewPrivileges=true
 ProtectSystem=strict
 ReadWritePaths=/opt/sentinel
-ProtectHome=true
+ProtectHome=false
 
 [Install]
 WantedBy=multi-user.target

@@ -121,6 +121,36 @@ def maintenance_tick() -> None:
         logger.exception("maintenance_tick failed")
 
 
+def _startup_check() -> None:
+    """Validate environment before entering the main loop.
+
+    Catches common deployment issues early (permissions, missing dirs,
+    unconfigured bot tokens) and logs clear warnings instead of crashing
+    silently in the main loop.
+    """
+    import os
+    import tempfile
+
+    # Check cache directory is writable (yfinance caches data here)
+    cache_dir = os.path.expanduser("~/.cache/trade_proj/yf_cache")
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=cache_dir) as f:
+            pass
+    except PermissionError:
+        logger.error("Cache directory %s is not writable. "
+                      "Check ProtectHome=false in the systemd service file.", cache_dir)
+        raise
+
+    # Warn if no bot tokens are configured (daemon will run but ignore Telegram)
+    tokens = get_user_bot_tokens()
+    if not tokens:
+        logger.warning("No users have a Telegram bot token configured. "
+                        "Telegram commands will not work until a token is set in notification_preferences.")
+    else:
+        logger.info("Polling %d user bot token(s)", len(tokens))
+
+
 def main() -> None:
     """Initialize databases and run the main daemon loop forever.
 
@@ -144,6 +174,8 @@ def main() -> None:
     init_auth_db()
     init_notification_db()
     logger.info("Databases initialized")
+
+    _startup_check()
 
     last_check_tick = 0.0
     last_poll_tick = 0.0
