@@ -2,7 +2,7 @@
 Sentinel — Fundamental Analysis Dashboard
 Phase 1+2: Big 3 Cards + Story + Key Numbers + Peer Context
 
-A stock analysis tool that ANYONE can understand.
+A stock analysis tool that ANYONE can understand. -- Bloomberg terminal as north star
 """
 
 import streamlit as st

@@ -157,6 +157,77 @@ Explains the methodology behind each score, the data sources, and important disc
 
 ---
 
+## Telegram Bot
+
+Sentinel includes a Telegram bot that delivers notifications, stock analysis, and market data right to your phone. Each user brings their own bot token (created via [@BotFather](https://t.me/BotFather)) — no shared infrastructure needed.
+
+### Setup
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) on Telegram — you'll receive a bot token.
+2. Save the token in your Sentinel **Settings** page.
+3. Send any message (or `/start`) to your bot — it will auto-link your Telegram chat to your Sentinel account.
+4. Alternatively, use `/link your-sentinel-username` to connect an existing account.
+
+### Commands
+
+#### Account
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Connect your Telegram to Sentinel and receive a welcome summary |
+| `/link <username>` | Link your Telegram to an existing Sentinel account |
+
+#### Watchlist
+
+| Command | Description |
+|---------|-------------|
+| `/watchlist` | View all your saved tickers with price, daily change, and 3-month growth |
+| `/add <TICKER>` | Add a ticker to your watchlist (e.g., `/add AAPL`) |
+| `/remove <TICKER>` | Remove a ticker from your watchlist (e.g., `/remove TSLA`) |
+
+#### Stock Info
+
+| Command | Description |
+|---------|-------------|
+| `/status` | Full watchlist price growth summary (3/6/12 month) |
+| `/score <TICKER>` | Complete health report: Health Score, F-Score, Z-Score, Risk, Valuation, Red Flags |
+| `/price <TICKER>` | 3/6/12 month price growth for a single ticker |
+| `/news <TICKER>` | Recent news headlines for a ticker |
+
+#### Market Overview
+
+| Command | Description |
+|---------|-------------|
+| `/market` | Top 10 market movers and major indices (S&P 500, DJIA, NASDAQ, etc.) |
+| `/macro` | Macro indicators: VIX, S&P 500 trend, yield curve, credit, dollar strength |
+
+#### Notifications
+
+| Command | Description |
+|---------|-------------|
+| `/alerts` | View your last 10 notifications (unread first) |
+| `/check <TICKER>` | Force an immediate re-check of a ticker's scores and flags |
+| `/prefs` | View your current notification preferences |
+| `/interval <hours>` | Change how often the daemon checks your watchlist (1–24 hours) |
+
+#### Help
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show all available commands |
+
+### Example Flow
+
+```
+/start                          →  Welcome message + watchlist summary
+/score NVDA                     →  Full health report for NVIDIA
+/add MSFT                       →  Added MSFT to watchlist
+/macro                          →  VIX, S&P 500 trend, yield curve, etc.
+/interval 6                     →  Check every 6 hours instead of default
+```
+
+---
+
 ## Design Philosophy
 
 - **Plain English first.** Every number answers "what does this mean?" — no jargon, no assumptions.
