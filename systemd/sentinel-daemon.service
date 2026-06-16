@@ -1,0 +1,23 @@
+[Unit]
+Description=Sentinel Notification Daemon — 24/7 background alert service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/openSourceProjects/tradeProj
+ExecStart=%h/openSourceProjects/tradeProj/.venv/bin/python3 -m src.notifications.daemon
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sentinel-daemon
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=%h/openSourceProjects/tradeProj/watchlist.db %h/openSourceProjects/tradeProj/watchlist.db-wal %h/openSourceProjects/tradeProj/watchlist.db-shm
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target
