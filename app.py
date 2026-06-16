@@ -70,6 +70,44 @@ init_db()
 init_auth_db()
 init_notification_db()
 
+# ─── Remote DB Init (for Streamlit Cloud sync) ──────────────
+try:
+    _api_url = st.secrets.get("SENTINEL_API_URL", "")
+    _api_key = st.secrets.get("SENTINEL_API_KEY", "")
+except Exception:
+    _api_url = ""
+    _api_key = ""
+
+from src.data.remote_db import init_remote_db, get_remote_db
+init_remote_db(_api_url, _api_key)
+_remote = get_remote_db()
+
+# ─── Remote/Local DB Routing Wrappers ───────────────────────
+def _remote_load_watchlist(user_id: int) -> List[str]:
+    if _remote:
+        return _remote.load_user_watchlist(user_id)
+    from src.data.watchlist_db import load_user_watchlist
+    return load_user_watchlist(user_id)
+
+def _remote_add_ticker(user_id: int, ticker: str) -> None:
+    if _remote:
+        _remote.add_user_ticker(user_id, ticker)
+    else:
+        add_user_ticker(user_id, ticker)
+
+def _remote_remove_ticker(user_id: int, ticker: str) -> None:
+    if _remote:
+        _remote.remove_user_ticker(user_id, ticker)
+    else:
+        remove_user_ticker(user_id, ticker)
+
+def _remote_clear_watchlist(user_id: int) -> None:
+    if _remote:
+        for t in st.session_state.watchlist:
+            _remote.remove_user_ticker(user_id, t)
+    else:
+        clear_user_watchlist(user_id)
+
 # ─── Session State ──────────────────────────────────────────
 if "watchlist" not in st.session_state:
     st.session_state.watchlist = []
@@ -95,8 +133,7 @@ if st.session_state.user is None and _session_token:
     if restored:
         st.session_state.user = restored
         st.session_state.session_token = _session_token
-        from src.data.watchlist_db import load_user_watchlist
-        st.session_state.watchlist = load_user_watchlist(restored["id"])
+        st.session_state.watchlist = _remote_load_watchlist(restored["id"])
 
 # ── Google OAuth auto-login ───────────────────────────────
 # When the user completes the Google OAuth flow, Streamlit's built-in
@@ -130,8 +167,7 @@ if oauth_active and st.session_state.user is None:
         st.session_state.session_token = token
         st.query_params["session"] = token
         # Load user's watchlist
-        from src.data.watchlist_db import load_user_watchlist
-        st.session_state.watchlist = load_user_watchlist(user["id"])
+        st.session_state.watchlist = _remote_load_watchlist(user["id"])
 
 # If a ticker was passed via URL query param (e.g., from a shared link or
 # an HTML anchor navigation), pre-fill the dashboard search box so the
@@ -1482,7 +1518,7 @@ if page == "🏠 Dashboard":
             if st.button("⭐ Save to Watchlist", use_container_width=True, key=f"save_{ticker}"):
                 st.session_state.watchlist.append(ticker)
                 if user:
-                    add_user_ticker(user["id"], ticker)
+                    _remote_add_ticker(user["id"], ticker)
                 else:
                     db_add_ticker(ticker)
                 st.rerun()
@@ -1490,7 +1526,7 @@ if page == "🏠 Dashboard":
             if st.button("✅ Saved", use_container_width=True, key=f"saved_{ticker}", help="Click to remove"):
                 st.session_state.watchlist.remove(ticker)
                 if user:
-                    remove_user_ticker(user["id"], ticker)
+                    _remote_remove_ticker(user["id"], ticker)
                 else:
                     db_remove_ticker(ticker)
                 st.rerun()
@@ -1819,7 +1855,7 @@ elif page == "📋 Watchlist":
                 if st.button(f"🗑️", key=f"wl_remove_{ticker}", help=f"Remove {ticker} from watchlist"):
                     st.session_state.watchlist.remove(ticker)
                     if user:
-                        remove_user_ticker(user["id"], ticker)
+                        _remote_remove_ticker(user["id"], ticker)
                     else:
                         db_remove_ticker(ticker)
                     st.rerun()
@@ -1829,7 +1865,7 @@ elif page == "📋 Watchlist":
                 if st.button(f"Remove {ticker}", key=f"wl_rm_bad_{ticker}"):
                     st.session_state.watchlist.remove(ticker)
                     if user:
-                        remove_user_ticker(user["id"], ticker)
+                        _remote_remove_ticker(user["id"], ticker)
                     else:
                         db_remove_ticker(ticker)
                     st.rerun()
@@ -1842,7 +1878,7 @@ elif page == "📋 Watchlist":
         if st.button("🗑️ Clear Watchlist", key="wl_clear"):
             st.session_state.watchlist = []
             if user:
-                clear_user_watchlist(user["id"])
+                _remote_clear_watchlist(user["id"])
             else:
                 db_clear_watchlist()
             st.rerun()

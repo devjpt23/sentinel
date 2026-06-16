@@ -1,0 +1,26 @@
+[Unit]
+Description=Sentinel HTTP API — remote data access for Streamlit Cloud
+After=network.target sentinel-daemon.service
+
+[Service]
+Type=simple
+User=sentinel
+Group=sentinel
+WorkingDirectory=/opt/sentinel
+Environment=PYTHONUNBUFFERED=1
+Environment=SENTINEL_API_KEY=CHANGE_ME
+ExecStart=/opt/sentinel/.venv/bin/python -m src.api.server
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sentinel-api
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sentinel
+ProtectHome=false
+
+[Install]
+WantedBy=multi-user.target
