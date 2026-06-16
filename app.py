@@ -102,7 +102,14 @@ if st.session_state.user is None and _session_token:
 # When the user completes the Google OAuth flow, Streamlit's built-in
 # st.login("google") sets st.user with their Google profile. We map that
 # to our local user DB so they get watchlist persistence, notifications, etc.
-if st.user.is_logged_in and st.session_state.user is None:
+# Only attempt this when st.user exists and has the expected attributes
+# (Streamlit Cloud without OAuth configured won't have st.user.is_logged_in).
+try:
+    oauth_active = st.user.is_logged_in
+except AttributeError:
+    oauth_active = False
+
+if oauth_active and st.session_state.user is None:
     google_email = st.user.email
     google_name = st.user.name or google_email.split("@")[0]
     google_id = getattr(st.user, "sub", "") or google_email
