@@ -18,13 +18,10 @@ UNIT_NAME="sentinel-daemon.service"
 log() { echo "[update] $*"; }
 fail() { echo "[update] ERROR: $*" >&2; exit 1; }
 
-require_root() {
-    if [ "$(id -u)" -ne 0 ]; then
-        fail "This script must be run as root (sudo)"
-    fi
-}
-
-require_root
+# Run under sudo if not already root
+if [ "$(id -u)" -ne 0 ]; then
+    exec sudo bash "$0" "$@"
+fi
 
 # Check that the install exists
 if [ ! -d "$INSTALL_DIR/.venv" ]; then
