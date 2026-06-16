@@ -207,14 +207,16 @@ def send_watchlist_summary(bot_token: str, chat_id: str, user_id: int) -> None:
 
 # ─── Chat ID Discovery ──────────────────────────────────────
 
-def discover_chat_id(bot_token: str) -> Optional[str]:
+def discover_chat_id(bot_token: str, user_id: Optional[int] = None) -> Optional[str]:
     """Poll a bot's getUpdates once to find any chat_id.
 
     Call this after the user saves their token. If someone has sent any
     message to the bot, returns their chat_id. Returns None if no messages
     found (user hasn't messaged the bot yet).
 
-    Also processes any /link commands found during discovery.
+    When *user_id* is provided, all commands (/help, /start, /link, /status,
+    etc.) are routed through the same ``_process_update`` handler that the
+    daemon uses — so every command gets a response, not just ``/link``.
     """
     if not bot_token:
         return None
@@ -234,8 +236,11 @@ def discover_chat_id(bot_token: str) -> Optional[str]:
             text = message.get("text", "").strip()
 
             if chat_id:
-                # If there's a /link command, process it
-                if text.startswith("/link"):
+                # When user_id is known, route ALL commands through the
+                # same handler the daemon uses.
+                if user_id is not None:
+                    _process_update(user_id, bot_token, update)
+                elif text.startswith("/link"):
                     _handle_link_command(bot_token, chat_id, text)
                 # Return the first chat_id found
                 return chat_id

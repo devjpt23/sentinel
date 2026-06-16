@@ -471,7 +471,7 @@ def render_settings_page() -> None:
         col_retry = st.container()
         with col_retry:
             if st.button("🔄 Retry Discovery", use_container_width=True, key="retry_telegram_link"):
-                found_id = discover_chat_id(_telegram_token)
+                found_id = discover_chat_id(_telegram_token, user["id"])
                 if found_id:
                     from src.data.auth_db import link_telegram
                     link_telegram(user["id"], found_id)
@@ -516,7 +516,7 @@ def render_settings_page() -> None:
                         telegram_enabled=1,
                     )
                     # Try auto-discovery — user may have already messaged the bot
-                    found_id = discover_chat_id(token)
+                    found_id = discover_chat_id(token, user["id"])
                     if found_id:
                         from src.data.auth_db import link_telegram
                         link_telegram(user["id"], found_id)
