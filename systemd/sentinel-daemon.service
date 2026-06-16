@@ -16,7 +16,8 @@ SyslogIdentifier=sentinel-daemon
 # Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=%h/openSourceProjects/tradeProj/watchlist.db %h/openSourceProjects/tradeProj/watchlist.db-wal %h/openSourceProjects/tradeProj/watchlist.db-shm
+ReadWritePaths=%h/openSourceProjects/tradeProj/watchlist.db
+ReadWriteDirectories=%h/openSourceProjects/tradeProj
 PrivateTmp=true
 
 [Install]
