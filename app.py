@@ -169,6 +169,18 @@ if oauth_active and st.session_state.user is None:
         # Load user's watchlist
         st.session_state.watchlist = _remote_load_watchlist(user["id"])
 
+# ── Telegram command polling (Streamlit Cloud) ─────────────
+# On Streamlit Cloud the daemon doesn't run, so we poll all users'
+# bot tokens on every app load to process pending Telegram commands
+# (/help, /start, /status, etc.) immediately.
+try:
+    from src.data.notification_db import get_user_bot_tokens
+    from src.notifications.telegram_bot import poll_user_bot
+    for u in get_user_bot_tokens():
+        poll_user_bot(u["user_id"], u["telegram_bot_token"])
+except Exception:
+    pass  # Graceful degrade — daemon or VPS handles this normally
+
 # If a ticker was passed via URL query param (e.g., from a shared link or
 # an HTML anchor navigation), pre-fill the dashboard search box so the
 # analysis loads immediately.
