@@ -37,22 +37,22 @@ def render_sec_filings_page():
         return
 
     # ── Fetch data ──────────────────────────────────────
-    from src.data.openbb_fetcher import (
-        fetch_sec_filings_obb,
-        fetch_insider_trading_obb,
-        OPENBB_AVAILABLE,
-    )
+    from src.data.openbb_fetcher import OPENBB_AVAILABLE
 
-    if not OPENBB_AVAILABLE:
-        st.warning(
-            "SEC Filings data is currently unavailable. "
-            "The OpenBB library is not installed in this environment."
+    if OPENBB_AVAILABLE:
+        from src.data.openbb_fetcher import (
+            fetch_sec_filings_obb as _fetch_filings,
+            fetch_insider_trading_obb as _fetch_insider,
         )
-        return
+    else:
+        from src.data.sec_edgar import (
+            fetch_sec_filings_edgar as _fetch_filings,
+            fetch_insider_trading_edgar as _fetch_insider,
+        )
 
     with st.spinner(f"Fetching SEC filings and insider trades for {ticker}..."):
-        filings_df = fetch_sec_filings_obb(ticker)
-        insider_df = fetch_insider_trading_obb(ticker)
+        filings_df = _fetch_filings(ticker)
+        insider_df = _fetch_insider(ticker)
 
     # ── Tabs ────────────────────────────────────────────
     tab1, tab2 = st.tabs(["📋 SEC Filings", "🔍 Insider Trading"])
