@@ -40,7 +40,15 @@ def render_sec_filings_page():
     from src.data.openbb_fetcher import (
         fetch_sec_filings_obb,
         fetch_insider_trading_obb,
+        OPENBB_AVAILABLE,
     )
+
+    if not OPENBB_AVAILABLE:
+        st.warning(
+            "SEC Filings data is currently unavailable. "
+            "The OpenBB library is not installed in this environment."
+        )
+        return
 
     with st.spinner(f"Fetching SEC filings and insider trades for {ticker}..."):
         filings_df = fetch_sec_filings_obb(ticker)

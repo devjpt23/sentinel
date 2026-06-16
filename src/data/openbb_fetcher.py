@@ -27,7 +27,12 @@ from typing import Optional, Dict, Any, List
 
 import pandas as pd
 
-from openbb import obb
+try:
+    from openbb import obb  # noqa: F401
+    OPENBB_AVAILABLE = True
+except ImportError:
+    obb = None  # type: ignore[misc, assignment]
+    OPENBB_AVAILABLE = False
 
 # ═══════════════════════════════════════════════════════════════
 #  Rate limiter (simple token-bucket, thread-safe)
@@ -196,6 +201,9 @@ def fetch_company_profile_obb(ticker: str) -> Optional[Dict[str, Any]]:
     Returns a dict compatible with the ``company`` and ``market`` sub-dicts
     expected by the dashboard.
     """
+    if not OPENBB_AVAILABLE:
+        return None
+
     def _fetch():
         row = _try_providers(
             lambda: _safe_first_row(obb.equity.profile(
@@ -238,6 +246,9 @@ def fetch_financial_metrics_obb(ticker: str) -> Optional[Dict[str, Any]]:
     Tries FMP first (richer data), falls back to yfinance.
     Returns a flat dict of the most recent annual period.
     """
+    if not OPENBB_AVAILABLE:
+        return None
+
     def _fetch():
         row = _try_providers(
             lambda: _safe_first_row(obb.equity.fundamental.metrics(
@@ -257,6 +268,9 @@ def fetch_financial_metrics_obb(ticker: str) -> Optional[Dict[str, Any]]:
 
 def fetch_income_stmt_obb(ticker: str, limit: int = 4) -> Optional[pd.DataFrame]:
     """Income statement (annual) via OpenBB — FMP preferred, yfinance fallback."""
+    if not OPENBB_AVAILABLE:
+        return None
+
     def _fetch():
         return _try_providers(
             lambda: _safe_to_df(obb.equity.fundamental.income(
@@ -269,6 +283,9 @@ def fetch_income_stmt_obb(ticker: str, limit: int = 4) -> Optional[pd.DataFrame]
 
 def fetch_balance_sheet_obb(ticker: str, limit: int = 4) -> Optional[pd.DataFrame]:
     """Balance sheet (annual) via OpenBB — FMP preferred, yfinance fallback."""
+    if not OPENBB_AVAILABLE:
+        return None
+
     def _fetch():
         return _try_providers(
             lambda: _safe_to_df(obb.equity.fundamental.balance(
@@ -281,6 +298,9 @@ def fetch_balance_sheet_obb(ticker: str, limit: int = 4) -> Optional[pd.DataFram
 
 def fetch_cash_flow_obb(ticker: str, limit: int = 4) -> Optional[pd.DataFrame]:
     """Cash flow statement (annual) via OpenBB — FMP preferred, yfinance fallback."""
+    if not OPENBB_AVAILABLE:
+        return None
+
     def _fetch():
         return _try_providers(
             lambda: _safe_to_df(obb.equity.fundamental.cash(
@@ -303,6 +323,9 @@ def fetch_analyst_consensus_obb(ticker: str) -> Optional[Dict[str, Any]]:
              recommendation (buy/hold/sell), recommendation_mean,
              number_of_analysts, current_price.
     """
+    if not OPENBB_AVAILABLE:
+        return None
+
     def _fetch():
         row = _try_providers(
             lambda: _safe_first_row(obb.equity.estimates.consensus(
@@ -344,6 +367,9 @@ def fetch_analyst_consensus_obb(ticker: str) -> Optional[Dict[str, Any]]:
 
 def fetch_price_quote_obb(ticker: str) -> Optional[Dict[str, Any]]:
     """Live price quote via OpenBB yfinance provider."""
+    if not OPENBB_AVAILABLE:
+        return None
+
     def _fetch():
         result = obb.equity.price.quote(symbol=ticker.upper(), provider="yfinance")
         return _safe_first_row(result)
@@ -353,6 +379,9 @@ def fetch_price_quote_obb(ticker: str) -> Optional[Dict[str, Any]]:
 
 def fetch_price_history_obb(ticker: str, period: str = "5y") -> Optional[pd.DataFrame]:
     """Historical daily prices via OpenBB yfinance provider."""
+    if not OPENBB_AVAILABLE:
+        return None
+
     def _fetch():
         result = obb.equity.price.historical(
             symbol=ticker.upper(), provider="yfinance"
@@ -384,6 +413,9 @@ def fetch_screener_obb(country: str = "us") -> Optional[pd.DataFrame]:
 
     Returns up to 200 stocks with price, change, market cap, P/E, etc.
     """
+    if not OPENBB_AVAILABLE:
+        return None
+
     country = country.lower()
     if country not in SUPPORTED_SCREENER_COUNTRIES:
         country = "us"
@@ -409,6 +441,9 @@ def fetch_sec_filings_obb(
     Returns: filing_date, report_type, report_url, filing_detail_url, etc.
     Filters to 10-K, 10-Q, 8-K report types.
     """
+    if not OPENBB_AVAILABLE:
+        return None
+
     def _fetch():
         result = obb.equity.fundamental.filings(
             symbol=ticker.upper(), provider="sec"
@@ -441,6 +476,9 @@ def fetch_insider_trading_obb(
 
     Note: This endpoint downloads SEC filings so it can be slow (~5-15 s).
     """
+    if not OPENBB_AVAILABLE:
+        return None
+
     def _fetch():
         result = obb.equity.ownership.insider_trading(
             symbol=ticker.upper(), provider="sec", limit=limit

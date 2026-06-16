@@ -86,7 +86,14 @@ def render_screener_page():
         )
 
     # ── Fetch ────────────────────────────────────────────
-    from src.data.openbb_fetcher import fetch_screener_obb
+    from src.data.openbb_fetcher import fetch_screener_obb, OPENBB_AVAILABLE
+
+    if not OPENBB_AVAILABLE:
+        st.warning(
+            "Screener data is currently unavailable. "
+            "The OpenBB library is not installed in this environment."
+        )
+        return
 
     with st.spinner(f"Scanning {COUNTRY_OPTIONS.get(country_choice, country_choice)}..."):
         df = fetch_screener_obb(country=country_choice)
