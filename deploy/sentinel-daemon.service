@@ -18,7 +18,7 @@ SyslogIdentifier=sentinel-daemon
 # Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/opt/sentinel/watchlist.db
+DirectoryReadWritePaths=/opt/sentinel
 ProtectHome=true
 
 [Install]
