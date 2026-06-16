@@ -23,7 +23,21 @@ from src.display.notifications import (
     render_notification_list, render_settings_page,
 )
 from src.display.custom_alerts import render_custom_alerts_page
-from src.notifications.scheduler import start_scheduler, set_scheduler_instance
+
+# Scheduler is optional — the app runs fine without it (daemon handles 24/7 checks
+# when deployed on a VPS). Gracefully degrade if apscheduler isn't installed.
+try:
+    from src.notifications.scheduler import start_scheduler, set_scheduler_instance
+    _SCHEDULER_AVAILABLE = True
+except ImportError:
+    _SCHEDULER_AVAILABLE = False
+
+    def start_scheduler():
+        return None
+
+    def set_scheduler_instance(sched):
+        pass
+
 from src.scoring.health import compute_health_score
 from src.scoring.zscore import compute_altman_zscore
 from src.scoring.valuation import compute_price_verdict
