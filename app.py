@@ -16,7 +16,7 @@ from src.data.fetcher import fetch_top_movers, fetch_market_news, fetch_market_i
 from src.data.fetcher import fetch_batch_metrics
 from src.data.watchlist_db import init_db, load_watchlist, add_ticker as db_add_ticker, remove_ticker as db_remove_ticker, clear_watchlist as db_clear_watchlist
 from src.data.watchlist_db import add_user_ticker, remove_user_ticker, clear_user_watchlist
-from src.data.auth_db import init_auth_db, needs_migration, legacy_watchlist_count
+from src.data.auth_db import init_auth_db, needs_migration, legacy_watchlist_count, get_all_users
 from src.data.notification_db import init_notification_db
 from src.display.notifications import (
     render_auth_ui, render_notification_bell, render_notification_preferences,
@@ -704,6 +704,10 @@ with st.sidebar:
 
     st.markdown("### Navigation")
     nav_options = ["🏠 Dashboard", "📋 Watchlist", "🔎 Stock Screener", "📄 SEC Filings", "🔍 Sector Search", "🔔 Notifications", "⚡ Custom Alerts", "⚙️ Settings", "ℹ️ About"]
+    # Admin page — only visible to the owner account
+    owner = st.session_state.get("user")
+    if owner and owner.get("username") == "owner":
+        nav_options.append("👤 Admin")
     default_idx = st.session_state.pop("_nav_idx", 0)
     page = st.radio(
         "Navigation",
@@ -1907,6 +1911,25 @@ elif page == "⚡ Custom Alerts":
 # ─── Settings Page ──────────────────────────────────────────
 elif page == "⚙️ Settings":
     render_settings_page()
+
+# ─── Admin Page ────────────────────────────────────────────
+elif page == "👤 Admin":
+    all_users = get_all_users()
+    st.markdown("### 👤 Registered Users")
+    st.caption(f"{len(all_users)} account(s)")
+    if all_users:
+        for u in all_users:
+            with st.container(border=True):
+                col1, col2, col3 = st.columns(3)
+                col1.metric("ID", u["id"])
+                col2.markdown(f"**{u['username']}**")
+                if u.get("display_name"):
+                    col2.caption(u["display_name"])
+                col3.markdown(f"Auth: `{u.get('auth_provider', 'password')}`")
+                if u.get("telegram_chat_id"):
+                    col3.markdown(f"TG: `{u['telegram_chat_id']}`")
+                if u.get("email"):
+                    col3.markdown(f"Email: `{u['email']}`")
 
 # ─── About Page ────────────────────────────────────────────
 else:
