@@ -13,7 +13,17 @@ from typing import Optional, Dict, Any, List, Tuple
 from src.data.fetcher import fetch_company_data, fetch_peers, fetch_peer_metrics, compute_peer_averages
 from src.data.fetcher import fetch_macro_context, fetch_analyst_data, fetch_institutional_data
 from src.data.fetcher import fetch_top_movers, fetch_market_news, fetch_market_indices
+from src.data.fetcher import fetch_batch_metrics
 from src.data.watchlist_db import init_db, load_watchlist, add_ticker as db_add_ticker, remove_ticker as db_remove_ticker, clear_watchlist as db_clear_watchlist
+from src.data.watchlist_db import add_user_ticker, remove_user_ticker, clear_user_watchlist
+from src.data.auth_db import init_auth_db, needs_migration, legacy_watchlist_count
+from src.data.notification_db import init_notification_db
+from src.display.notifications import (
+    render_auth_ui, render_notification_bell, render_notification_preferences,
+    render_notification_list, render_settings_page,
+)
+from src.display.custom_alerts import render_custom_alerts_page
+from src.notifications.scheduler import start_scheduler, set_scheduler_instance
 from src.scoring.health import compute_health_score
 from src.scoring.zscore import compute_altman_zscore
 from src.scoring.valuation import compute_price_verdict
@@ -27,6 +37,11 @@ from src.display.live_price import render_live_ticker
 from src.display.sector_search import render_sector_search
 from src.display.macro_strip import render_macro_strip
 from src.display.sentiment import analyze_news_sentiment, render_sentiment_meter, render_analyst_consensus, render_institutional_activity
+from src.display.supply_chain import render_supply_chain_tab
+from src.data.supply_chain_data import get_enriched_relationships
+from src.display.screener import render_screener_page
+
+from src.display.sec_filings import render_sec_filings_page
 
 # ─── Page Config ───────────────────────────────────────────
 st.set_page_config(
@@ -38,12 +53,91 @@ st.set_page_config(
 
 # ─── Database Init ──────────────────────────────────────────
 init_db()
+init_auth_db()
+init_notification_db()
 
 # ─── Session State ──────────────────────────────────────────
 if "watchlist" not in st.session_state:
-    st.session_state.watchlist = load_watchlist()
+    st.session_state.watchlist = []
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "session_token" not in st.session_state:
+    st.session_state.session_token = None
 if "theme" not in st.session_state:
     st.session_state.theme = "dark"
+if "use_openbb" not in st.session_state:
+    st.session_state.use_openbb = True
+
+# Auto-restore user from persistent session token if state was lost.
+# Check URL query params FIRST (survive browser refresh), then
+# session_state (faster for normal tab navigation).
+_session_token = (
+    st.session_state.get("session_token")
+    or st.query_params.get("session")
+)
+if st.session_state.user is None and _session_token:
+    from src.data.auth_db import restore_user_from_session
+    restored = restore_user_from_session(_session_token)
+    if restored:
+        st.session_state.user = restored
+        st.session_state.session_token = _session_token
+        from src.data.watchlist_db import load_user_watchlist
+        st.session_state.watchlist = load_user_watchlist(restored["id"])
+
+# ── Google OAuth auto-login ───────────────────────────────
+# When the user completes the Google OAuth flow, Streamlit's built-in
+# st.login("google") sets st.user with their Google profile. We map that
+# to our local user DB so they get watchlist persistence, notifications, etc.
+if st.user.is_logged_in and st.session_state.user is None:
+    google_email = st.user.email
+    google_name = st.user.name or google_email.split("@")[0]
+    google_id = getattr(st.user, "sub", "") or google_email
+    google_picture = getattr(st.user, "picture", "") or ""
+
+    if google_email:
+        from src.data.auth_db import create_or_update_google_user
+        user = create_or_update_google_user(
+            email=google_email,
+            display_name=google_name,
+            google_id=google_id,
+            avatar_url=google_picture,
+        )
+        st.session_state.user = user
+        # Create a persistent session token
+        from src.data.auth_db import create_session
+        token = create_session(user["id"])
+        st.session_state.session_token = token
+        st.query_params["session"] = token
+        # Load user's watchlist
+        from src.data.watchlist_db import load_user_watchlist
+        st.session_state.watchlist = load_user_watchlist(user["id"])
+
+# If a ticker was passed via URL query param (e.g., from a shared link or
+# an HTML anchor navigation), pre-fill the dashboard search box so the
+# analysis loads immediately.
+if st.query_params.get("ticker") and not st.session_state.get("ticker_search"):
+    st.session_state["ticker_search"] = st.query_params.get("ticker")
+
+# Consume a pending ticker from widgets that fire after the text_input is
+# already rendered (e.g., top-mover buttons).  The staging key lets us set
+# the value early enough that the text_input widget picks it up on rerun.
+_pending = st.session_state.pop("_pending_ticker_search", None)
+if _pending:
+    st.session_state["ticker_search"] = _pending
+
+# For authenticated users, the watchlist is loaded from their account
+# For unauthenticated users, fall back to legacy shared watchlist
+if st.session_state.user is None:
+    st.session_state.watchlist = load_watchlist()
+
+# ─── Start Background Scheduler ──────────────────────────────
+if "scheduler_started" not in st.session_state:
+    try:
+        sched = start_scheduler()
+        set_scheduler_instance(sched)
+    except Exception:
+        pass  # gracefully degrade if scheduler fails
+    st.session_state.scheduler_started = True
 
 # ─── Theme CSS ──────────────────────────────────────────────
 theme = st.session_state.theme
@@ -440,36 +534,26 @@ st.markdown(f"""
         font-weight: 600;
     }}
 
-    /* ── Movers Table ──────────────────────────────── */
-    .movers-table {{
-        width: 100%;
-        border-collapse: collapse;
+    /* ── Top Movers Buttons ─────────────────────────── */
+    /* Ticker buttons inside the movers section: compact, link-like appearance.
+       Scoped to .movers-section so they don't affect the rest of the app. */
+    .movers-section .stButton > button {{
         font-size: 0.85rem;
-    }}
-    .movers-table th {{
-        color: {muted};
         font-weight: 600;
-        text-align: left;
-        padding: 6px 10px;
-        border-bottom: 1px solid {border};
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
-    }}
-    .movers-table td {{
-        padding: 8px 10px;
-        border-bottom: 1px solid {border};
-    }}
-    .movers-table tr:hover td {{
-        background: rgba(88, 166, 255, 0.05);
-    }}
-    .movers-table a {{
+        padding: 2px 8px;
+        line-height: 1.2;
+        border: none;
+        background: transparent;
         color: {accent};
-        text-decoration: none;
-        font-weight: 600;
+        text-align: left;
     }}
-    .movers-table a:hover {{
+    .movers-section .stButton > button:hover {{
         text-decoration: underline;
+        background: rgba(88, 166, 255, 0.08);
+        color: {accent};
+    }}
+    .movers-section .stButton > button:active {{
+        background: rgba(88, 166, 255, 0.12);
     }}
 
     /* ── Market News Card ──────────────────────────── */
@@ -551,17 +635,33 @@ with st.sidebar:
         unsafe_allow_html=True
     )
 
+    # ── Auth UI ────────────────────────────────────────
+    render_auth_ui()
+
+    # Migration banner (shown before login)
+    if needs_migration() and st.session_state.get("user") is None:
+        count = legacy_watchlist_count()
+        st.info(f"📋 Found {count} saved stocks from the original watchlist. Register an account to claim them.")
+
+    st.markdown("---")
+
     st.markdown("### Navigation")
-    nav_options = ["🏠 Dashboard", "📋 Watchlist", "🎯 Strategy Lab", "🔍 Sector Search", "ℹ️ About"]
+    nav_options = ["🏠 Dashboard", "📋 Watchlist", "🎯 Strategy Lab", "🔎 Stock Screener", "📄 SEC Filings", "🔍 Sector Search", "🔔 Notifications", "⚡ Custom Alerts", "⚙️ Settings", "ℹ️ About"]
     default_idx = st.session_state.pop("_nav_idx", 0)
     page = st.radio(
-        "",
+        "Navigation",
         nav_options,
         index=default_idx if 0 <= default_idx < len(nav_options) else 0,
         label_visibility="collapsed",
     )
 
     st.markdown("---")
+
+    # ── Notification Bell ──────────────────────────────
+    render_notification_bell()
+
+    # ── Notification Preferences ────────────────────────
+    render_notification_preferences()
 
     # Theme toggle
     theme_label = "🌙 Dark Mode" if st.session_state.theme == "dark" else "☀️ Light Mode"
@@ -1025,8 +1125,11 @@ def render_indices_strip(indices: list[dict]):
 def render_top_movers(movers: list[dict]):
     """Render a table of the top 10 daily movers (by absolute % change).
 
-    Each row shows the ticker (clickable), company name, price, and
-    color-coded daily change.
+    Each row shows the ticker (clickable button that preserves the session),
+    company name, price, and color-coded daily change.
+
+    Uses Streamlit-native buttons (not raw HTML links) so the user's
+    login session survives the navigation.
     """
     if not movers:
         st.markdown(
@@ -1035,7 +1138,41 @@ def render_top_movers(movers: list[dict]):
         )
         return
 
-    rows = []
+    # Open a scoped wrapper so CSS targets only buttons inside this section
+    st.markdown('<div class="movers-section">', unsafe_allow_html=True)
+
+    # Column layout: rank | ticker button | company | price | change
+    # Proportions tuned for readability inside a half-width column
+    COL_WIDTHS = [0.4, 1.6, 3.5, 1.8, 2.0]
+
+    # --- Header row ---
+    h_cols = st.columns(COL_WIDTHS)
+    header_labels = ["", "Ticker", "Company", "Price", "Change"]
+    header_styles = [
+        "",  # rank column — no header
+        "text-align: left;",
+        "text-align: left;",
+        "text-align: right;",
+        "text-align: right;",
+    ]
+    for col, label, hstyle in zip(h_cols, header_labels, header_styles):
+        if not label:
+            continue
+        with col:
+            st.markdown(
+                f'<p style="color: #8B949E; font-weight: 600; font-size: 0.7rem; '
+                f'text-transform: uppercase; letter-spacing: 0.05em; margin: 0; '
+                f'padding: 0 0 4px 0; {hstyle}">{label}</p>',
+                unsafe_allow_html=True,
+            )
+
+    # Thin separator below header
+    st.markdown(
+        '<hr style="margin: 0 0 6px 0; border-color: #21262D;">',
+        unsafe_allow_html=True,
+    )
+
+    # --- Data rows ---
     for i, m in enumerate(movers):
         ticker = m["ticker"]
         name = m.get("name", ticker)[:30]
@@ -1048,31 +1185,59 @@ def render_top_movers(movers: list[dict]):
         change_arrow = "▲" if direction == "up" else "▼"
         change_str = f"{change_arrow} {abs(change_pct):.2f}%"
 
-        # Build a link that pre-fills the dashboard ticker search
-        # Streamlit doesn't support real links to itself, so use a button-like link
-        ticker_link = (
-            f'<a href="?ticker={ticker}" target="_self" '
-            f'onclick="window.location.href=window.location.pathname+\'?ticker={ticker}\';return false;">'
-            f'{ticker}</a>'
-        )
+        r_cols = st.columns(COL_WIDTHS)
 
-        rows.append(
-            f'<tr>'
-            f'<td style="width: 30px; color: #484F58; font-size: 0.75rem;">{i+1}</td>'
-            f'<td>{ticker_link}</td>'
-            f'<td style="color: #8B949E; font-size: 0.8rem;">{name}</td>'
-            f'<td style="text-align: right;">{price_str}</td>'
-            f'<td style="text-align: right; color: {change_color}; font-weight: 600;">{change_str}</td>'
-            f'</tr>'
-        )
+        # Rank number
+        with r_cols[0]:
+            st.markdown(
+                f'<p style="color: #484F58; font-size: 0.75rem; margin: 0;">{i+1}</p>',
+                unsafe_allow_html=True,
+            )
 
-    st.markdown(
-        f'<table class="movers-table">'
-        f'<thead><tr><th></th><th>Ticker</th><th>Company</th><th>Price</th><th>Change</th></tr></thead>'
-        f'<tbody>{"".join(rows)}</tbody>'
-        f'</table>',
-        unsafe_allow_html=True,
-    )
+        # Ticker — Streamlit button (preserves session across clicks)
+        with r_cols[1]:
+            if st.button(
+                ticker,
+                key=f"topmover_{ticker}",
+                use_container_width=True,
+            ):
+                # Staging key — consumed before text_input renders on rerun,
+                # avoiding the "cannot modify after widget instantiation" error.
+                st.session_state["_pending_ticker_search"] = ticker
+                st.rerun()
+
+        # Company name
+        with r_cols[2]:
+            st.markdown(
+                f'<p style="color: #8B949E; font-size: 0.8rem; margin: 0; '
+                f'white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{name}</p>',
+                unsafe_allow_html=True,
+            )
+
+        # Price
+        with r_cols[3]:
+            st.markdown(
+                f'<p style="text-align: right; margin: 0; font-size: 0.85rem;">{price_str}</p>',
+                unsafe_allow_html=True,
+            )
+
+        # Change %
+        with r_cols[4]:
+            st.markdown(
+                f'<p style="text-align: right; color: {change_color}; '
+                f'font-weight: 600; margin: 0; font-size: 0.85rem;">{change_str}</p>',
+                unsafe_allow_html=True,
+            )
+
+        # Row separator (skip after the last row)
+        if i < len(movers) - 1:
+            st.markdown(
+                '<hr style="margin: 4px 0; border-color: #21262D;">',
+                unsafe_allow_html=True,
+            )
+
+    # Close the movers-section wrapper (opened after the empty check)
+    st.markdown('</div>', unsafe_allow_html=True)
 
 
 # ─── Helper: Render Market News ───────────────────────────────
@@ -1109,7 +1274,7 @@ render_watchlist_marquee()
 if page == "🏠 Dashboard":
     # Search bar
     ticker = st.text_input(
-        "",
+        "Enter a stock ticker",
         placeholder="Enter a stock ticker (e.g., NVDA, AAPL, TSLA)...",
         key="ticker_search",
         label_visibility="collapsed",
@@ -1289,17 +1454,24 @@ if page == "🏠 Dashboard":
     st.markdown("<hr>", unsafe_allow_html=True)
 
     # Watchlist button
+    user = st.session_state.get("user")
     wl_col1, wl_col2 = st.columns([1, 5])
     with wl_col1:
         if ticker not in st.session_state.watchlist:
             if st.button("⭐ Save to Watchlist", use_container_width=True, key=f"save_{ticker}"):
                 st.session_state.watchlist.append(ticker)
-                db_add_ticker(ticker)
+                if user:
+                    add_user_ticker(user["id"], ticker)
+                else:
+                    db_add_ticker(ticker)
                 st.rerun()
         else:
             if st.button("✅ Saved", use_container_width=True, key=f"saved_{ticker}", help="Click to remove"):
                 st.session_state.watchlist.remove(ticker)
-                db_remove_ticker(ticker)
+                if user:
+                    remove_user_ticker(user["id"], ticker)
+                else:
+                    db_remove_ticker(ticker)
                 st.rerun()
 
     # Live Price Ticker (updates every 5 seconds, client-side JS)
@@ -1485,6 +1657,44 @@ if page == "🏠 Dashboard":
     st.markdown('<div class="section-title">⚠️ RED FLAGS & RISKS</div>', unsafe_allow_html=True)
     render_red_flags(red_flags)
 
+    st.markdown("<hr>", unsafe_allow_html=True)
+
+    # ─── Supply Chain Analysis (Bloomberg SPLC-inspired) ─────
+    st.markdown('<div class="section-title">🔗 SUPPLY CHAIN ANALYSIS</div>', unsafe_allow_html=True)
+
+    # Build metrics dict for linked tickers (health + market data)
+    from src.data.company_links import get_relationships_for_ticker
+    linked = set()
+    for rel in get_relationships_for_ticker(ticker):
+        if rel["source"].upper() == ticker.upper():
+            linked.add(rel["target"].upper())
+        else:
+            linked.add(rel["source"].upper())
+
+    # Merge peer_data + batch fetch for supply chain partners not already fetched
+    chain_metrics = dict(peer_data) if peer_data else {}
+    missing = [t for t in linked if t not in chain_metrics]
+    if missing:
+        try:
+            batch = fetch_batch_metrics(missing)
+            chain_metrics.update({t: d for t, d in batch.items() if d is not None})
+        except Exception:
+            pass  # graceful fallback if batch fetch fails
+
+    # Add center ticker's own data for health badge
+    chain_metrics[ticker] = {
+        "name": company.get("name", ticker),
+        "sector": company.get("sector", ""),
+        "industry": company.get("industry", ""),
+        "market_cap": data.get("market", {}).get("market_cap"),
+        "quick_health": {
+            "score": round(health_score / 10) if isinstance(health_score, (int, float)) else None,
+            "verdict": health_verdict,
+        },
+    }
+
+    render_supply_chain_tab(ticker, chain_metrics)
+
     # ─── Deep Dive (Phase 4) ─────
     st.markdown("<br>", unsafe_allow_html=True)
     with st.expander("▶ SEE ALL DETAILS — Financial Statements, DCF Model, Full Analysis"):
@@ -1513,14 +1723,25 @@ if page == "🏠 Dashboard":
 elif page == "📋 Watchlist":
     st.markdown('<h2 style="color: #58A6FF;">📋 Watchlist</h2>', unsafe_allow_html=True)
 
+    user = st.session_state.get("user")
+
     if not st.session_state.watchlist:
-        st.markdown(
-            '<div style="text-align: center; padding: 60px 20px;">'
-            '<p style="color: #8B949E; font-size: 1.1rem;">Your watchlist is empty.</p>'
-            '<p style="color: #484F58; font-size: 0.85rem;">Go to the Dashboard, analyze a stock, and click ⭐ Save to Watchlist.</p>'
-            '</div>',
-            unsafe_allow_html=True
-        )
+        if user is None:
+            st.markdown(
+                '<div style="text-align: center; padding: 60px 20px;">'
+                '<p style="color: #8B949E; font-size: 1.1rem;">Sign in to save your watchlist.</p>'
+                '<p style="color: #484F58; font-size: 0.85rem;">Go to the sidebar, create an account, then analyze stocks and save them here.</p>'
+                '</div>',
+                unsafe_allow_html=True
+            )
+        else:
+            st.markdown(
+                '<div style="text-align: center; padding: 60px 20px;">'
+                '<p style="color: #8B949E; font-size: 1.1rem;">Your watchlist is empty.</p>'
+                '<p style="color: #484F58; font-size: 0.85rem;">Go to the Dashboard, analyze a stock, and click ⭐ Save to Watchlist.</p>'
+                '</div>',
+                unsafe_allow_html=True
+            )
     else:
         st.markdown(f"Tracking **{len(st.session_state.watchlist)}** stock{'s' if len(st.session_state.watchlist) > 1 else ''}")
         st.markdown("<br>", unsafe_allow_html=True)
@@ -1576,14 +1797,20 @@ elif page == "📋 Watchlist":
                 # Remove button
                 if st.button(f"🗑️", key=f"wl_remove_{ticker}", help=f"Remove {ticker} from watchlist"):
                     st.session_state.watchlist.remove(ticker)
-                    db_remove_ticker(ticker)
+                    if user:
+                        remove_user_ticker(user["id"], ticker)
+                    else:
+                        db_remove_ticker(ticker)
                     st.rerun()
 
             except Exception as e:
                 st.warning(f"Could not load data for {ticker}. It may have been delisted or the ticker is invalid.")
                 if st.button(f"Remove {ticker}", key=f"wl_rm_bad_{ticker}"):
                     st.session_state.watchlist.remove(ticker)
-                    db_remove_ticker(ticker)
+                    if user:
+                        remove_user_ticker(user["id"], ticker)
+                    else:
+                        db_remove_ticker(ticker)
                     st.rerun()
 
             st.markdown("<br>", unsafe_allow_html=True)
@@ -1593,7 +1820,10 @@ elif page == "📋 Watchlist":
         st.markdown("---")
         if st.button("🗑️ Clear Watchlist", key="wl_clear"):
             st.session_state.watchlist = []
-            db_clear_watchlist()
+            if user:
+                clear_user_watchlist(user["id"])
+            else:
+                db_clear_watchlist()
             st.rerun()
 
 
@@ -1608,7 +1838,7 @@ elif page == "🎯 Strategy Lab":
     )
 
     lab_ticker = st.text_input(
-        "",
+        "Enter a ticker to simulate",
         placeholder="Enter a ticker to simulate (e.g., NVDA, AAPL, MU)...",
         key="lab_ticker",
         label_visibility="collapsed",
@@ -1637,9 +1867,29 @@ elif page == "🎯 Strategy Lab":
             lab_data["intrinsic_score"] = lab_intrinsic
             render_strategy_lab(lab_ticker, lab_price, lab_data)
 
+# ─── Stock Screener ──────────────────────────────────────────
+elif page == "🔎 Stock Screener":
+    render_screener_page()
+
+# ─── SEC Filings + Insider Trading ───────────────────────────
+elif page == "📄 SEC Filings":
+    render_sec_filings_page()
+
 # ─── Sector Search ──────────────────────────────────────────
 elif page == "🔍 Sector Search":
     render_sector_search()
+
+# ─── Notifications Page ─────────────────────────────────────
+elif page == "🔔 Notifications":
+    render_notification_list()
+
+# ─── Custom Alerts Page ─────────────────────────────────────
+elif page == "⚡ Custom Alerts":
+    render_custom_alerts_page()
+
+# ─── Settings Page ──────────────────────────────────────────
+elif page == "⚙️ Settings":
+    render_settings_page()
 
 # ─── About Page ────────────────────────────────────────────
 else:

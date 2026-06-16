@@ -16,3 +16,22 @@ featureReview.txt
 .vscode/
 fintech-advisor/
 insp_db/
+
+# Auth secrets (contains real OAuth client secrets)
+.streamlit/secrets.toml
+
+# Gmail credentials
+gmail_credentials.json
+
+
+
+#random files
+final-gap.txt
+geospatial.txt
+ntfy_implment.txt
+SUPPLY_CHAIN_SCALING.md
+todo.txt
+UI_UX_EVALUATION_REPORT.md
+docs/superpowers/specs/
+
+

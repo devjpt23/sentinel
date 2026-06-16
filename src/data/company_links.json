@@ -4,531 +4,532 @@
     "target": "TSM",
     "type": "supplier",
     "description": "TSMC manufactures all of NVIDIA's advanced GPUs and AI accelerators on its cutting-edge process nodes",
-    "strength": "strong"
+    "strength": "strong",
+    "financials": {"cogs_pct": 45.0, "supplier_revenue_pct": 19.0, "note": "NVDA paid ~$15B to TSMC in FY2025 (~45% of $33B COGS). NVDA overtook Apple as TSMC's #1 customer in 2025 at 19% of TSMC revenue. Source: TSMC revenue disclosures, NVDA 10-K."},
+    "target_geo": {"domicile": "TW", "manufacturing": ["TW", "US", "CN", "JP"]}
   },
   {
-    "source": "NVDA",
-    "target": "AMD",
-    "type": "competitor",
+    "source": "NVDA", "target": "AMD", "type": "competitor",
     "description": "Direct competitors in GPU, AI accelerator, and data center markets",
-    "strength": "strong"
+    "strength": "strong",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "TW", "MY"]}
   },
   {
-    "source": "NVDA",
-    "target": "INTC",
-    "type": "competitor",
+    "source": "NVDA", "target": "INTC", "type": "competitor",
     "description": "Competing in AI accelerators and data center GPUs; Intel is trying to enter the discrete GPU market",
-    "strength": "medium"
+    "strength": "medium",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "IE", "IL", "MY", "CN"]}
   },
   {
-    "source": "NVDA",
-    "target": "AVGO",
-    "type": "partner",
-    "description": "Broadcom provides networking chips and custom ASICs that complement NVIDIA's GPU platforms in data centers",
-    "strength": "medium"
+    "source": "NVDA", "target": "AVGO", "type": "partner",
+    "description": "Broadcom provides networking chips and custom ASICs that complement NVIDIA's GPU platforms",
+    "strength": "medium",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "SG", "MY"]}
   },
   {
-    "source": "NVDA",
-    "target": "MRVL",
-    "type": "partner",
+    "source": "NVDA", "target": "MRVL", "type": "partner",
     "description": "Marvell supplies data infrastructure silicon used alongside NVIDIA GPUs in cloud data centers",
-    "strength": "medium"
+    "strength": "medium",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "TW", "IN"]}
   },
   {
-    "source": "NVDA",
-    "target": "MU",
-    "type": "supplier",
+    "source": "NVDA", "target": "MU", "type": "supplier",
     "description": "Micron provides HBM (High Bandwidth Memory) used in NVIDIA's data center GPUs",
-    "strength": "strong"
+    "strength": "strong",
+    "financials": {"cogs_pct": 5.0, "supplier_revenue_pct": 4.0, "note": "MU is #2 HBM supplier to NVDA behind SK hynix. MU FY2024 revenue ~$25B."},
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "TW", "JP", "SG", "MY"]}
   },
   {
-    "source": "NVDA",
-    "target": "SMCI",
-    "type": "partner",
+    "source": "NVDA", "target": "SMCI", "type": "partner",
     "description": "Supermicro builds server systems featuring NVIDIA GPUs for AI data centers",
-    "strength": "strong"
+    "strength": "strong",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "TW", "NL"]}
   },
   {
-    "source": "NVDA",
-    "target": "DELL",
-    "type": "customer",
+    "source": "NVDA", "target": "DELL", "type": "customer",
     "description": "Dell sells enterprise servers and workstations powered by NVIDIA GPUs",
-    "strength": "medium"
+    "strength": "medium",
+    "financials": {"revenue_pct": 3.0, "customer_cogs_pct": 5.0, "note": "Dell enterprise server GPU spend. Dell FY2024 revenue ~$88B. NVDA GPU spend is material but not dominant."},
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "MY", "CN", "IE"]}
   },
   {
-    "source": "AVGO",
-    "target": "AAPL",
-    "type": "supplier",
-    "description": "Broadcom supplies wireless connectivity chips and RF components for iPhones and other Apple devices",
-    "strength": "strong"
+    "source": "NVDA", "target": "QCOM", "type": "competitor",
+    "description": "Competing in AI processors for mobile/edge — Qualcomm NPU vs NVIDIA Jetson",
+    "strength": "medium",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "TW", "KR", "CN"]}
   },
   {
-    "source": "QCOM",
-    "target": "AAPL",
-    "type": "supplier",
-    "description": "Qualcomm supplies 5G modem chips for iPhones, though Apple is developing its own modem",
-    "strength": "medium"
+    "source": "NVDA", "target": "ASML", "type": "customer",
+    "description": "TSMC uses ASML EUV machines to manufacture NVIDIA chips — indirect critical dependency",
+    "strength": "medium",
+    "target_geo": {"domicile": "NL", "manufacturing": ["NL", "US", "TW", "KR"]}
   },
   {
-    "source": "AAPL",
-    "target": "TSM",
-    "type": "customer",
-    "description": "Apple is TSMC's largest customer; TSMC manufactures all of Apple's A-series and M-series chips",
-    "strength": "strong"
+    "source": "NVDA", "target": "SKWS", "type": "supplier", "target_name": "SK hynix Inc.",
+    "description": "SK hynix supplies HBM3E memory used in NVIDIA H200 and B200 AI GPUs",
+    "strength": "strong",
+    "financials": {"cogs_pct": 13.0, "supplier_revenue_pct": 10.0, "note": "SK hynix is dominant HBM3E supplier (>70% share) for NVDA's latest GPUs. SK hynix FY2024 revenue ~$45B."},
+    "target_geo": {"domicile": "KR", "manufacturing": ["KR", "CN", "US"]}
   },
   {
-    "source": "AAPL",
-    "target": "MSFT",
-    "type": "competitor",
-    "description": "Compete in operating systems, cloud services, AI assistants, and productivity software",
-    "strength": "medium"
+    "source": "NVDA", "target": "CDNS", "type": "supplier",
+    "description": "Cadence provides EDA software tools for GPU and AI chip design",
+    "strength": "medium",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "IN", "IE"]}
   },
   {
-    "source": "AAPL",
-    "target": "GOOGL",
-    "type": "competitor",
-    "description": "Compete in mobile operating systems (iOS vs Android), AI, and services",
-    "strength": "strong"
+    "source": "NVDA", "target": "SNPS", "type": "supplier",
+    "description": "Synopsys provides chip design and verification software for NVIDIA GPU development",
+    "strength": "medium",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "IN", "VN"]}
   },
   {
-    "source": "AAPL",
-    "target": "GOOGL",
-    "type": "partner",
-    "description": "Google pays Apple billions annually to be the default search engine on Safari",
-    "strength": "strong"
+    "source": "AVGO", "target": "AAPL", "type": "supplier",
+    "description": "Broadcom supplies wireless connectivity chips and RF components for iPhones",
+    "strength": "strong",
+    "financials": {"cogs_pct": 4.0, "supplier_revenue_pct": 15.0, "note": "Broadcom disclosed Apple as ~15-20% of revenue (~$7-8B annually). Wireless chips + RF components for iPhones. AVGO FY2024 revenue ~$51B."},
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "SG", "MY"]}
   },
   {
-    "source": "AAPL",
-    "target": "SAMSUNG",
-    "type": "competitor",
+    "source": "QCOM", "target": "AAPL", "type": "supplier",
+    "description": "Qualcomm supplies 5G modem chips for iPhones — Apple developing in-house modem",
+    "strength": "medium",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "TW", "KR", "CN"]}
+  },
+  {
+    "source": "AAPL", "target": "TSM", "type": "customer",
+    "description": "Apple is TSMC's largest customer; TSMC manufactures all Apple A-series and M-series chips",
+    "strength": "strong",
+    "financials": {"revenue_pct": 18.0, "customer_cogs_pct": 17.0, "note": "Apple was TSMC's #1 customer in 2024 (24% rev), fell to #2 in 2025 (17%) as NVDA overtook on AI chip demand. Source: TSMC annual filings."},
+    "target_geo": {"domicile": "TW", "manufacturing": ["TW", "US", "CN", "JP"]}
+  },
+  {
+    "source": "AAPL", "target": "MSFT", "type": "competitor",
+    "description": "Compete in OS, cloud, AI assistants, and productivity software",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
+  },
+  {
+    "source": "AAPL", "target": "GOOGL", "type": "competitor",
+    "description": "Compete in mobile OS (iOS vs Android), AI, and services",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
+  },
+  {
+    "source": "AAPL", "target": "GOOGL", "type": "partner",
+    "description": "Google pays Apple billions annually to be default search engine on Safari",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
+  },
+  {
+    "source": "AAPL", "target": "SAMSUNG", "type": "competitor",
     "description": "Compete in smartphones, tablets, and consumer electronics globally",
-    "strength": "strong"
+    "strength": "strong",
+    "target_geo": {"domicile": "KR", "manufacturing": ["KR", "VN", "CN", "IN"]}
   },
   {
-    "source": "AAPL",
-    "target": "SAMSUNG",
-    "type": "supplier",
-    "description": "Samsung supplies OLED displays and memory chips for iPhones and other Apple devices",
-    "strength": "medium"
+    "source": "AAPL", "target": "SAMSUNG", "type": "supplier",
+    "description": "Samsung supplies OLED displays and memory chips for iPhones and Apple devices",
+    "strength": "medium",
+    "target_geo": {"domicile": "KR", "manufacturing": ["KR", "VN", "CN"]}
   },
   {
-    "source": "AMZN",
-    "target": "MSFT",
-    "type": "competitor",
-    "description": "AWS and Azure are the two largest cloud providers, competing intensely for enterprise customers",
-    "strength": "strong"
+    "source": "AAPL", "target": "FOXCONN", "type": "supplier",
+    "description": "Foxconn (Hon Hai) is Apple's largest manufacturing partner, assembling iPhones",
+    "strength": "strong",
+    "financials": {"cogs_pct": 12.0, "supplier_revenue_pct": 55.0, "note": "Apple is ~55% of Foxconn (Hon Hai) revenue — classic asymmetric dependency. Foxconn handles iPhone assembly and component procurement for Apple."},
+    "target_geo": {"domicile": "TW", "manufacturing": ["CN", "TW", "IN", "VN", "MX"]}
   },
   {
-    "source": "AMZN",
-    "target": "GOOGL",
-    "type": "competitor",
-    "description": "AWS competes with Google Cloud; both compete in AI services and digital advertising",
-    "strength": "medium"
+    "source": "AMZN", "target": "MSFT", "type": "competitor",
+    "description": "AWS and Azure are the two largest cloud providers",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "AMZN",
-    "target": "WMT",
-    "type": "competitor",
-    "description": "The two largest retailers in the US, competing across e-commerce and physical retail",
-    "strength": "strong"
+    "source": "AMZN", "target": "GOOGL", "type": "competitor",
+    "description": "AWS competes with Google Cloud in AI services and digital advertising",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "MSFT",
-    "target": "GOOGL",
-    "type": "competitor",
-    "description": "Compete in cloud (Azure vs GCP), AI (OpenAI/Copilot vs Gemini), search, and productivity",
-    "strength": "strong"
+    "source": "AMZN", "target": "WMT", "type": "competitor",
+    "description": "Two largest US retailers — e-commerce vs physical + e-commerce",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "MSFT",
-    "target": "ORCL",
-    "type": "competitor",
+    "source": "AMZN", "target": "NVDA", "type": "customer",
+    "description": "AWS is a top buyer of NVIDIA GPUs for cloud AI instances",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
+  },
+  {
+    "source": "MSFT", "target": "GOOGL", "type": "competitor",
+    "description": "Azure vs GCP, Copilot vs Gemini, Bing vs Google Search",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
+  },
+  {
+    "source": "MSFT", "target": "ORCL", "type": "competitor",
     "description": "Compete in enterprise software, databases, and cloud infrastructure",
-    "strength": "medium"
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "MSFT",
-    "target": "ORCL",
-    "type": "partner",
-    "description": "Oracle databases run on Azure; the companies collaborate on multi-cloud interoperability",
-    "strength": "medium"
+    "source": "MSFT", "target": "ORCL", "type": "partner",
+    "description": "Oracle databases run on Azure; multi-cloud interoperability partnership",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "MSFT",
-    "target": "CRM",
-    "type": "competitor",
-    "description": "Microsoft Dynamics 365 competes with Salesforce in CRM and enterprise applications",
-    "strength": "medium"
+    "source": "MSFT", "target": "CRM", "type": "competitor",
+    "description": "Dynamics 365 vs Salesforce in CRM and enterprise applications",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "MSFT",
-    "target": "ADBE",
-    "type": "competitor",
-    "description": "Compete in design, marketing, and document software; Adobe runs many workloads on Azure",
-    "strength": "medium"
+    "source": "MSFT", "target": "ADBE", "type": "competitor",
+    "description": "Compete in design, marketing, and document software",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "META",
-    "target": "GOOGL",
-    "type": "competitor",
-    "description": "The two dominant players in digital advertising, competing for ad dollars globally",
-    "strength": "strong"
+    "source": "MSFT", "target": "NVDA", "type": "customer",
+    "description": "Azure AI infrastructure runs on NVIDIA GPUs; Microsoft is a top-3 NVIDIA customer",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "META",
-    "target": "SNAP",
-    "type": "competitor",
-    "description": "Compete in social media and messaging; Meta has replicated Snapchat features across its apps",
-    "strength": "medium"
+    "source": "META", "target": "GOOGL", "type": "competitor",
+    "description": "Two dominant digital advertising players",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "META",
-    "target": "NVDA",
-    "type": "customer",
-    "description": "Meta is one of the largest buyers of NVIDIA GPUs for its AI research and recommendation systems",
-    "strength": "strong"
+    "source": "META", "target": "SNAP", "type": "competitor",
+    "description": "Compete in social media; Meta has replicated Snapchat features",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "GOOGL",
-    "target": "NVDA",
-    "type": "customer",
-    "description": "Google Cloud and DeepMind use NVIDIA GPUs extensively; Google also develops its own TPU chips",
-    "strength": "medium"
+    "source": "META", "target": "NVDA", "type": "customer",
+    "description": "Meta is a top-3 NVIDIA GPU buyer for AI research and recommendation systems",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "TSLA",
-    "target": "F",
-    "type": "competitor",
-    "description": "Compete in the electric vehicle market; Tesla leads in EVs while Ford rapidly expands its EV lineup",
-    "strength": "strong"
+    "source": "GOOGL", "target": "NVDA", "type": "customer",
+    "description": "Google Cloud and DeepMind use NVIDIA GPUs; Google also develops TPU chips",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "TSLA",
-    "target": "GM",
-    "type": "competitor",
+    "source": "TSLA", "target": "F", "type": "competitor",
+    "description": "Compete in EVs; Tesla leads while Ford expands its electric lineup",
+    "strength": "strong",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "MX", "DE", "CN"]}
+  },
+  {
+    "source": "TSLA", "target": "GM", "type": "competitor",
     "description": "Compete in EVs and autonomous driving technology",
-    "strength": "strong"
+    "strength": "strong",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "MX", "CN", "KR"]}
   },
   {
-    "source": "TSLA",
-    "target": "RIVN",
-    "type": "competitor",
-    "description": "Compete in the electric truck and SUV market",
-    "strength": "medium"
+    "source": "TSLA", "target": "RIVN", "type": "competitor",
+    "description": "Compete in electric truck and SUV market",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "TSLA",
-    "target": "PANW",
-    "type": "partner",
-    "description": "Palo Alto Networks provides cybersecurity solutions protecting Tesla's vehicle and factory networks",
-    "strength": "medium"
+    "source": "TSLA", "target": "PANW", "type": "partner",
+    "description": "Palo Alto Networks secures Tesla vehicle and factory networks",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "JPM",
-    "target": "BAC",
-    "type": "competitor",
-    "description": "The two largest US banks by assets, competing across retail banking, investment banking, and wealth management",
-    "strength": "strong"
+    "source": "TSLA", "target": "NVDA", "type": "customer",
+    "description": "Tesla uses NVIDIA GPUs to train Autopilot and Full Self-Driving AI models",
+    "strength": "strong",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "CN", "DE"]}
   },
   {
-    "source": "JPM",
-    "target": "GS",
-    "type": "competitor",
-    "description": "Compete in investment banking, trading, and asset management",
-    "strength": "strong"
+    "source": "TSLA", "target": "ALB", "type": "customer",
+    "description": "Tesla buys lithium from Albemarle for EV batteries",
+    "strength": "medium",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "CL", "AU"]}
   },
   {
-    "source": "JPM",
-    "target": "WFC",
-    "type": "competitor",
-    "description": "Compete in retail banking, mortgages, and consumer lending",
-    "strength": "medium"
+    "source": "JPM", "target": "BAC", "type": "competitor",
+    "description": "Two largest US banks — retail, investment banking, wealth management",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "V",
-    "target": "MA",
-    "type": "competitor",
-    "description": "The two dominant global payment networks, processing the majority of the world's card transactions",
-    "strength": "strong"
+    "source": "JPM", "target": "GS", "type": "competitor",
+    "description": "Compete in investment banking, trading, asset management",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "V",
-    "target": "PYPL",
-    "type": "competitor",
-    "description": "Compete in digital payments; Visa's network faces competition from PayPal's peer-to-peer platform",
-    "strength": "medium"
+    "source": "JPM", "target": "WFC", "type": "competitor",
+    "description": "Compete in retail banking, mortgages, consumer lending",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "XOM",
-    "target": "CVX",
-    "type": "competitor",
-    "description": "The two largest US integrated oil and gas companies",
-    "strength": "strong"
+    "source": "V", "target": "MA", "type": "competitor",
+    "description": "Two dominant global payment networks",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "XOM",
-    "target": "BP",
-    "type": "competitor",
-    "description": "Compete globally in oil exploration, production, and refining",
-    "strength": "medium"
+    "source": "V", "target": "PYPL", "type": "competitor",
+    "description": "Visa network vs PayPal peer-to-peer digital payments",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "PFE",
-    "target": "MRK",
-    "type": "competitor",
-    "description": "Compete in vaccines, oncology, and immunology drug markets",
-    "strength": "strong"
+    "source": "XOM", "target": "CVX", "type": "competitor",
+    "description": "Two largest US integrated oil and gas companies",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "PFE",
-    "target": "JNJ",
-    "type": "competitor",
-    "description": "Compete in pharmaceuticals and consumer health products",
-    "strength": "medium"
+    "source": "XOM", "target": "BP", "type": "competitor",
+    "description": "Global competitors in oil exploration, production, and refining",
+    "strength": "medium",
+    "target_geo": {"domicile": "GB"}
   },
   {
-    "source": "LLY",
-    "target": "NVO",
-    "type": "competitor",
-    "description": "The two dominant players in the GLP-1 weight loss and diabetes drug market",
-    "strength": "strong"
+    "source": "PFE", "target": "MRK", "type": "competitor",
+    "description": "Compete in vaccines, oncology, and immunology",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "UNH",
-    "target": "CI",
-    "type": "competitor",
-    "description": "The two largest US health insurers, competing across commercial, Medicare, and Medicaid markets",
-    "strength": "strong"
+    "source": "PFE", "target": "JNJ", "type": "competitor",
+    "description": "Compete in pharmaceuticals and consumer health",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "UNH",
-    "target": "HUM",
-    "type": "competitor",
-    "description": "Compete heavily in the Medicare Advantage market",
-    "strength": "medium"
+    "source": "LLY", "target": "NVO", "type": "competitor",
+    "description": "Two dominant GLP-1 weight loss and diabetes drug makers",
+    "strength": "strong",
+    "target_geo": {"domicile": "DK"}
   },
   {
-    "source": "HD",
-    "target": "LOW",
-    "type": "competitor",
-    "description": "The two dominant home improvement retailers in the US",
-    "strength": "strong"
+    "source": "UNH", "target": "CI", "type": "competitor",
+    "description": "Two largest US health insurers",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "WMT",
-    "target": "TGT",
-    "type": "competitor",
-    "description": "Compete in general merchandise retail; Target positions as a more upscale alternative to Walmart",
-    "strength": "medium"
+    "source": "UNH", "target": "HUM", "type": "competitor",
+    "description": "Compete heavily in Medicare Advantage",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "WMT",
-    "target": "COST",
-    "type": "competitor",
-    "description": "Compete in retail; Costco's membership model differs from Walmart's everyday-low-price approach",
-    "strength": "medium"
+    "source": "HD", "target": "LOW", "type": "competitor",
+    "description": "Two dominant US home improvement retailers",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "COST",
-    "target": "WMT",
-    "type": "competitor",
-    "description": "Costco's warehouse model competes with Walmart's Sam's Club and retail stores",
-    "strength": "medium"
+    "source": "WMT", "target": "TGT", "type": "competitor",
+    "description": "General merchandise retail — Target positions as more upscale",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "MCD",
-    "target": "SBUX",
-    "type": "competitor",
-    "description": "Compete for consumer dining dollars; both are global leaders in their restaurant categories",
-    "strength": "medium"
+    "source": "WMT", "target": "COST", "type": "competitor",
+    "description": "Walmart vs Costco membership warehouse model",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "SBUX",
-    "target": "CMG",
-    "type": "competitor",
-    "description": "Compete in the fast-casual and premium quick-service restaurant market",
-    "strength": "medium"
+    "source": "COST", "target": "WMT", "type": "competitor",
+    "description": "Costco vs Walmart's Sam's Club and retail stores",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "BA",
-    "target": "RTX",
-    "type": "competitor",
-    "description": "Compete in aerospace and defense; both are major suppliers to the US military and commercial aviation",
-    "strength": "strong"
+    "source": "MCD", "target": "SBUX", "type": "competitor",
+    "description": "Compete for consumer dining dollars globally",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "BA",
-    "target": "LMT",
-    "type": "competitor",
-    "description": "Compete in defense contracting, fighter jets, and space systems",
-    "strength": "medium"
+    "source": "SBUX", "target": "CMG", "type": "competitor",
+    "description": "Fast-casual and premium quick-service restaurant competition",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "LMT",
-    "target": "RTX",
-    "type": "competitor",
-    "description": "Top US defense contractors competing for Pentagon contracts across missiles, radar, and aviation",
-    "strength": "strong"
+    "source": "BA", "target": "RTX", "type": "competitor",
+    "description": "Major aerospace and defense contractors",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "NFLX",
-    "target": "DIS",
-    "type": "competitor",
-    "description": "The two leaders in streaming entertainment, competing for subscribers and content",
-    "strength": "strong"
+    "source": "BA", "target": "LMT", "type": "competitor",
+    "description": "Compete in defense contracting, fighter jets, space systems",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "DIS",
-    "target": "CMCSA",
-    "type": "competitor",
-    "description": "Compete in media, theme parks, and streaming; Comcast owns NBCUniversal",
-    "strength": "medium"
+    "source": "LMT", "target": "RTX", "type": "competitor",
+    "description": "Top US defense contractors — missiles, radar, aviation",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "T",
-    "target": "VZ",
-    "type": "competitor",
-    "description": "The two largest US wireless carriers, competing for subscribers and 5G coverage",
-    "strength": "strong"
+    "source": "NFLX", "target": "DIS", "type": "competitor",
+    "description": "Two leaders in streaming entertainment",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "T",
-    "target": "TMUS",
-    "type": "competitor",
-    "description": "Compete in wireless services; T-Mobile has been gaining market share from AT&T and Verizon",
-    "strength": "medium"
+    "source": "DIS", "target": "CMCSA", "type": "competitor",
+    "description": "Media, theme parks, streaming — Comcast owns NBCUniversal",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "UBER",
-    "target": "LYFT",
-    "type": "competitor",
-    "description": "The two leading ride-hailing platforms in the US, competing for drivers and riders",
-    "strength": "strong"
+    "source": "T", "target": "VZ", "type": "competitor",
+    "description": "Two largest US wireless carriers",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "UBER",
-    "target": "DASH",
-    "type": "competitor",
-    "description": "Compete in food delivery; Uber Eats and DoorDash are the two largest platforms in the US",
-    "strength": "medium"
+    "source": "T", "target": "TMUS", "type": "competitor",
+    "description": "Wireless — T-Mobile gaining share from AT&T and Verizon",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "CRM",
-    "target": "ORCL",
-    "type": "competitor",
-    "description": "Salesforce disrupted Oracle's enterprise software dominance; Benioff is a former Oracle executive",
-    "strength": "medium"
+    "source": "UBER", "target": "LYFT", "type": "competitor",
+    "description": "Two leading US ride-hailing platforms",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "ADBE",
-    "target": "CRM",
-    "type": "competitor",
-    "description": "Compete in enterprise marketing and experience software; overlap in digital experience platforms",
-    "strength": "medium"
+    "source": "UBER", "target": "DASH", "type": "competitor",
+    "description": "Uber Eats vs DoorDash — largest US food delivery platforms",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "NOW",
-    "target": "CRM",
-    "type": "competitor",
-    "description": "ServiceNow and Salesforce compete in enterprise workflow and automation platforms",
-    "strength": "medium"
+    "source": "CRM", "target": "ORCL", "type": "competitor",
+    "description": "Salesforce disrupted Oracle's enterprise software dominance",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "PANW",
-    "target": "CRWD",
-    "type": "competitor",
-    "description": "Leading cybersecurity companies competing in endpoint protection, cloud security, and threat detection",
-    "strength": "strong"
+    "source": "ADBE", "target": "CRM", "type": "competitor",
+    "description": "Enterprise marketing and digital experience platform overlap",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "PANW",
-    "target": "FTNT",
-    "type": "competitor",
-    "description": "Compete in network security and firewall markets",
-    "strength": "medium"
+    "source": "NOW", "target": "CRM", "type": "competitor",
+    "description": "ServiceNow and Salesforce compete in enterprise workflow/automation",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "PANW",
-    "target": "ZS",
-    "type": "competitor",
-    "description": "Compete in zero-trust security and secure access service edge (SASE)",
-    "strength": "medium"
+    "source": "PANW", "target": "CRWD", "type": "competitor",
+    "description": "Leading cybersecurity — endpoint, cloud security, threat detection",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "CRWD",
-    "target": "S",
-    "type": "competitor",
-    "description": "CrowdStrike and SentinelOne compete directly in AI-powered endpoint security",
-    "strength": "strong"
+    "source": "PANW", "target": "FTNT", "type": "competitor",
+    "description": "Network security and firewall market competition",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "AMAT",
-    "target": "LRCX",
-    "type": "competitor",
-    "description": "The two largest semiconductor equipment manufacturers, supplying chip fabrication tools",
-    "strength": "strong"
+    "source": "PANW", "target": "ZS", "type": "competitor",
+    "description": "Zero-trust security and secure access service edge (SASE)",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "AMAT",
-    "target": "KLAC",
-    "type": "competitor",
-    "description": "Compete in process control and yield management equipment for semiconductor manufacturing",
-    "strength": "medium"
+    "source": "CRWD", "target": "S", "type": "competitor",
+    "description": "CrowdStrike vs SentinelOne — AI-powered endpoint security",
+    "strength": "strong",
+    "target_geo": {"domicile": "US"}
   },
   {
-    "source": "LRCX",
-    "target": "KLAC",
-    "type": "competitor",
-    "description": "Both supply critical equipment to chip fabs; Lam focuses on etch/deposition, KLA on inspection",
-    "strength": "medium"
+    "source": "AMAT", "target": "LRCX", "type": "competitor",
+    "description": "Two largest semiconductor equipment manufacturers",
+    "strength": "strong",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "SG", "IL"]}
   },
   {
-    "source": "ASML",
-    "target": "TSM",
-    "type": "supplier",
+    "source": "AMAT", "target": "KLAC", "type": "competitor",
+    "description": "Process control and yield management for semiconductor manufacturing",
+    "strength": "medium",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "IL"]}
+  },
+  {
+    "source": "AMAT", "target": "TSM", "type": "supplier",
+    "description": "Applied Materials supplies deposition, etch, and inspection equipment to TSMC fabs",
+    "strength": "strong",
+    "financials": {"cogs_pct": 4.0, "supplier_revenue_pct": 12.0, "note": "TSMC is a top AMAT customer. AMAT FY2024 revenue ~$27B. Semiconductor equipment market is diversified across foundries."},
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "SG", "IL", "TW"]}
+  },
+  {
+    "source": "LRCX", "target": "TSM", "type": "supplier",
+    "description": "Lam Research provides etch and deposition equipment critical to TSMC advanced manufacturing",
+    "strength": "strong",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "TW", "KR"]}
+  },
+  {
+    "source": "LRCX", "target": "KLAC", "type": "competitor",
+    "description": "Both supply critical equipment — Lam: etch/deposition, KLA: inspection",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
+  },
+  {
+    "source": "ASML", "target": "TSM", "type": "supplier",
     "description": "ASML's EUV lithography machines are essential for TSMC's most advanced chip manufacturing",
-    "strength": "strong"
+    "strength": "strong",
+    "financials": {"cogs_pct": 7.0, "supplier_revenue_pct": 30.0, "note": "TSMC is ASML's largest customer (~30% of ASML revenue). Each EUV machine costs ~$200M. TSMC deploys the most EUV systems globally."},
+    "target_geo": {"domicile": "NL", "manufacturing": ["NL", "US", "TW", "KR"]}
   },
   {
-    "source": "ASML",
-    "target": "INTC",
-    "type": "supplier",
-    "description": "Intel relies on ASML's lithography equipment for its advanced chip fabrication processes",
-    "strength": "strong"
+    "source": "ASML", "target": "INTC", "type": "supplier",
+    "description": "Intel relies on ASML's lithography equipment for advanced chip fabrication",
+    "strength": "strong",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "IE", "IL", "MY"]}
   },
   {
-    "source": "TSM",
-    "target": "INTC",
-    "type": "competitor",
-    "description": "Intel is trying to compete with TSMC in the foundry business with Intel Foundry Services",
-    "strength": "medium"
+    "source": "TSM", "target": "INTC", "type": "competitor",
+    "description": "Intel competes with TSMC foundry via Intel Foundry Services",
+    "strength": "medium",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "IE", "IL", "MY"]}
   },
   {
-    "source": "TSM",
-    "target": "AMD",
-    "type": "customer",
-    "description": "AMD relies on TSMC to manufacture its Ryzen, EPYC, and Radeon chips",
-    "strength": "strong"
+    "source": "TSM", "target": "AMD", "type": "customer",
+    "description": "AMD relies on TSMC to manufacture Ryzen, EPYC, and Radeon chips",
+    "strength": "strong",
+    "target_geo": {"domicile": "US", "manufacturing": ["US", "TW", "MY"]}
   },
   {
-    "source": "NVDA",
-    "target": "QCOM",
-    "type": "competitor",
-    "description": "Competing in AI processors for mobile and edge devices; Qualcomm's NPU vs NVIDIA's Jetson platform",
-    "strength": "medium"
+    "source": "SHEL", "target": "XOM", "type": "competitor",
+    "description": "Shell and ExxonMobil — global integrated energy competitors",
+    "strength": "medium",
+    "target_geo": {"domicile": "NL"}
   },
   {
-    "source": "SHEL",
-    "target": "XOM",
-    "type": "competitor",
-    "description": "Shell and ExxonMobil are global integrated energy competitors across all segments",
-    "strength": "medium"
-  },
-  {
-    "source": "SOFI",
-    "target": "JPM",
-    "type": "competitor",
-    "description": "SoFi challenges traditional banks with digital-first banking, lending, and investing",
-    "strength": "medium"
+    "source": "SOFI", "target": "JPM", "type": "competitor",
+    "description": "SoFi challenges traditional banks with digital-first banking, lending, investing",
+    "strength": "medium",
+    "target_geo": {"domicile": "US"}
   }
 ]

@@ -258,6 +258,43 @@ def render_analyst_consensus(analyst_data: Dict[str, Any], company_name: str):
             unsafe_allow_html=True,
         )
 
+        # ── OpenBB-enriched: recommendation score + number of analysts ──
+        num_analysts = analyst_data.get("num_analysts")
+        rec_mean = analyst_data.get("recommendation_mean")
+        if num_analysts or rec_mean:
+            meta_parts = []
+            if num_analysts:
+                meta_parts.append(f"📊 {num_analysts} analysts covering")
+            if rec_mean is not None:
+                # 1.0 = Strong Buy, 5.0 = Strong Sell
+                if rec_mean <= 1.5:
+                    rec_label = "Strong Buy"
+                    rec_color = "#00C853"
+                elif rec_mean <= 2.0:
+                    rec_label = "Buy"
+                    rec_color = "#00C853"
+                elif rec_mean <= 2.5:
+                    rec_label = "Moderate Buy"
+                    rec_color = "#69F0AE"
+                elif rec_mean <= 3.5:
+                    rec_label = "Hold"
+                    rec_color = "#FFD600"
+                elif rec_mean <= 4.0:
+                    rec_label = "Moderate Sell"
+                    rec_color = "#FF9800"
+                else:
+                    rec_label = "Sell"
+                    rec_color = "#FF1744"
+                meta_parts.append(
+                    f'<span style="color: {rec_color}; font-weight: 600;">{rec_label} ({rec_mean:.1f}/5)</span>'
+                )
+            if meta_parts:
+                st.markdown(
+                    f'<div style="font-size: 0.8rem; color: #8B949E; margin-bottom: 8px;">'
+                    f'{" · ".join(meta_parts)}</div>',
+                    unsafe_allow_html=True,
+                )
+
         if has_recs:
             rec = analyst_data["recommendations"]
             total = rec.get("total", 0)

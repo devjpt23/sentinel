@@ -1,0 +1,25 @@
+[Unit]
+Description=Sentinel Notification Daemon — 24/7 stock alert checker
+After=network.target
+
+[Service]
+Type=simple
+User=sentinel
+Group=sentinel
+WorkingDirectory=/opt/sentinel
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/sentinel/.venv/bin/python -m src.notifications.daemon
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=sentinel-daemon
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/sentinel/watchlist.db
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

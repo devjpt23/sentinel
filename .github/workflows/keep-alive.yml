@@ -1,0 +1,29 @@
+name: Keep Alive (Market Hours)
+
+# Ping the Streamlit app every 30 min during US market hours to prevent
+# hibernation. When the app wakes, the scheduler runs a startup catch-up
+# check — so no notifications are missed even after long idle periods.
+#
+# If your Streamlit Cloud URL is different, edit APP_URL below.
+
+on:
+  schedule:
+    # US market hours 9:30 AM – 4:00 PM ET = 13:30 – 20:00 UTC
+    # Every 30 minutes, staggered slightly to avoid hitting on the hour
+    - cron: '7,37 13-20 * * 1-5'
+
+  # Also allow manual trigger for testing
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Streamlit app
+        env:
+          APP_URL: https://sentinel.streamlit.app
+        run: |
+          echo "Pinging $APP_URL..."
+          curl -s -o /dev/null -w "HTTP %{http_code}" "$APP_URL" || true
+          echo ""
+          echo "Keep-alive ping sent."

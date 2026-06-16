@@ -338,7 +338,26 @@ def fetch_company_data(ticker: str) -> Dict[str, Any]:
     Uses _cached_ticker_info() for the .info dict (the heaviest API call).
     Financial statements and history are not disk-cached (they're only
     fetched on drill-down, not on every page load).
+
+    If the primary yfinance path fails, falls back to OpenBB as a
+    last-resort data source so the dashboard stays usable.
     """
+    try:
+        return _fetch_company_data_yf(ticker)
+    except Exception:
+        # Last-resort: try OpenBB before giving up entirely
+        try:
+            from src.data.openbb_fetcher import fetch_company_data_via_openbb
+            obb_data = fetch_company_data_via_openbb(ticker)
+            if obb_data is not None:
+                return obb_data
+        except Exception:
+            pass
+        raise  # re-raise the original yfinance error if everything failed
+
+
+def _fetch_company_data_yf(ticker: str) -> Dict[str, Any]:
+    """Core yfinance-based company data fetch (the original implementation)."""
     t = _get_ticker(ticker.upper())
     info = _cached_ticker_info(ticker)
 
@@ -433,7 +452,7 @@ def fetch_company_data(ticker: str) -> Dict[str, Any]:
         valuation["graham_number"] = None
 
     # --- Financial Statements (last 5 years annual) ---
-    statements = _fetch_statements(t)
+    statements = _fetch_statements(t, ticker)
 
     # --- Historical price data for sparklines ---
     hist = t.history(period="5y")
@@ -482,28 +501,60 @@ def _safe_interest_coverage(t: yf.Ticker) -> Optional[float]:
     return None
 
 
-def _fetch_statements(t: yf.Ticker) -> Dict[str, pd.DataFrame]:
-    """Fetch annual financial statements, keeping last 5 years."""
+def _fetch_statements(t: yf.Ticker, ticker: str = "") -> Dict[str, pd.DataFrame]:
+    """Fetch annual financial statements, keeping last 5 years.
+
+    Uses yfinance as the primary source. Falls back to OpenBB if any
+    statement is empty (e.g., when yfinance's statement parser fails).
+    """
+    income = pd.DataFrame()
+    balance = pd.DataFrame()
+    cashflow = pd.DataFrame()
+
+    # ── Primary: yfinance ──
     try:
-        income = t.financials
-        if income is not None:
-            income = income.iloc[:, :5]  # last 5 years
+        income_df = t.financials
+        if income_df is not None:
+            income = income_df.iloc[:, :5]
     except Exception:
-        income = pd.DataFrame()
+        pass
 
     try:
-        balance = t.balance_sheet
-        if balance is not None:
-            balance = balance.iloc[:, :5]
+        balance_df = t.balance_sheet
+        if balance_df is not None:
+            balance = balance_df.iloc[:, :5]
     except Exception:
-        balance = pd.DataFrame()
+        pass
 
     try:
-        cashflow = t.cashflow
-        if cashflow is not None:
-            cashflow = cashflow.iloc[:, :5]
+        cashflow_df = t.cashflow
+        if cashflow_df is not None:
+            cashflow = cashflow_df.iloc[:, :5]
     except Exception:
-        cashflow = pd.DataFrame()
+        pass
+
+    # ── Fallback: OpenBB if any statement is empty ──
+    if (income.empty or balance.empty or cashflow.empty) and ticker:
+        try:
+            from src.data.openbb_fetcher import (
+                fetch_income_stmt_obb,
+                fetch_balance_sheet_obb,
+                fetch_cash_flow_obb,
+            )
+            if income.empty:
+                obb_income = fetch_income_stmt_obb(ticker)
+                if obb_income is not None and not obb_income.empty:
+                    income = obb_income
+            if balance.empty:
+                obb_balance = fetch_balance_sheet_obb(ticker)
+                if obb_balance is not None and not obb_balance.empty:
+                    balance = obb_balance
+            if cashflow.empty:
+                obb_cf = fetch_cash_flow_obb(ticker)
+                if obb_cf is not None and not obb_cf.empty:
+                    cashflow = obb_cf
+        except Exception:
+            pass  # graceful degradation — stick with whatever yfinance gave us
 
     return {
         "income": income,
@@ -577,6 +628,64 @@ def _compute_trends(hist: pd.DataFrame, t: yf.Ticker) -> Dict[str, list]:
         "debt": debt_trend,
         "price": price_trend,
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Price Growth (3m / 6m / 12m)
+# ═══════════════════════════════════════════════════════════════
+
+def fetch_price_growth(ticker: str) -> Optional[Dict[str, Optional[float]]]:
+    """Fetch 3-month, 6-month, and 12-month price growth percentages.
+
+    Uses daily closing prices from the last year. Each growth value is the
+    percentage change from the closest trading day at the lookback point
+    to the most recent close.
+
+    Returns a dict like {'3m': 12.5, '6m': -3.2, '12m': 28.7}, or None if
+    there isn't enough price history to compute even one period.
+
+    None values for individual periods mean that specific lookback window
+    doesn't have enough data (e.g. a recently listed stock with < 12 months
+    of history would have 12m = None).
+    """
+    from datetime import timedelta, datetime, timezone
+
+    try:
+        t = _get_ticker(ticker.upper())
+        hist = t.history(period="1y")
+
+        if hist is None or hist.empty or len(hist) < 20:
+            return None
+
+        closes = hist["Close"]
+        latest_close = float(closes.iloc[-1])
+        latest_date = closes.index[-1]
+
+        if latest_close <= 0:
+            return None
+
+        result: dict[str, Optional[float]] = {}
+        for months, label in [(3, "3m"), (6, "6m"), (12, "12m")]:
+            target_date = latest_date - timedelta(days=months * 30)
+            # Find the closest trading day at or before the target date
+            mask = closes.index <= target_date
+            if mask.any():
+                idx = mask.sum() - 1  # last index where condition holds
+                if idx >= 0:
+                    past_close = float(closes.iloc[idx])
+                    if past_close > 0:
+                        pct_change = ((latest_close / past_close) - 1) * 100
+                        result[label] = round(pct_change, 1)
+                        continue
+            result[label] = None
+
+        # Return None only if every period is missing
+        if all(v is None for v in result.values()):
+            return None
+        return result
+
+    except Exception:
+        return None
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -1042,6 +1151,10 @@ def fetch_analyst_data(ticker: str) -> Dict[str, Any]:
     """Fetch analyst price targets and recommendations for a ticker.
 
     Returns a dict with price_targets, recommendations, and a plain-English verdict.
+
+    Enriches yfinance data with OpenBB's analyst consensus endpoint when
+    available, which adds: recommendation_mean, number_of_analysts, and
+    more reliable price target consensus.
     """
     try:
         t = _get_ticker(ticker.upper())
@@ -1050,26 +1163,39 @@ def fetch_analyst_data(ticker: str) -> Dict[str, Any]:
 
     result = {}
 
-    # ── Price Targets ────────────────────────────────────
+    # ── Price Targets (enriched via OpenBB when available) ──
     try:
-        pt = t.analyst_price_targets
-        if isinstance(pt, dict) and pt:
-            info = _cached_ticker_info(ticker)
-            price = info.get("currentPrice") or info.get("regularMarketPrice")
-            result["price_targets"] = {
-                "current": price,
-                "low": pt.get("low"),
-                "mean": pt.get("mean"),
-                "median": pt.get("median"),
-                "high": pt.get("high"),
-            }
-            # Compute upside/downside
-            target = pt.get("mean") or pt.get("median")
-            if target and price and price > 0:
-                upside_pct = ((target - price) / price) * 100
-                result["price_targets"]["upside_pct"] = upside_pct
+        # Try OpenBB first — it provides the richest price target data
+        from src.data.openbb_fetcher import fetch_analyst_consensus_obb
+        obb_consensus = fetch_analyst_consensus_obb(ticker)
+        if obb_consensus and obb_consensus.get("price_targets"):
+            result["price_targets"] = obb_consensus["price_targets"]
+            result["num_analysts"] = obb_consensus.get("num_analysts")
+            result["recommendation_mean"] = obb_consensus.get("recommendation_mean")
+            result["recommendation"] = obb_consensus.get("recommendation")
     except Exception:
         pass
+
+    # Fall back to raw yfinance if OpenBB didn't provide targets
+    if "price_targets" not in result:
+        try:
+            pt = t.analyst_price_targets
+            if isinstance(pt, dict) and pt:
+                info = _cached_ticker_info(ticker)
+                price = info.get("currentPrice") or info.get("regularMarketPrice")
+                result["price_targets"] = {
+                    "current": price,
+                    "low": pt.get("low"),
+                    "mean": pt.get("mean"),
+                    "median": pt.get("median"),
+                    "high": pt.get("high"),
+                }
+                target = pt.get("mean") or pt.get("median")
+                if target and price and price > 0:
+                    upside_pct = ((target - price) / price) * 100
+                    result["price_targets"]["upside_pct"] = upside_pct
+        except Exception:
+            pass
 
     # ── Recommendations ──────────────────────────────────
     try:

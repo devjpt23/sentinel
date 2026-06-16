@@ -1,0 +1,32 @@
+name: Deploy Daemon
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DAEMON_HOST }}
+          username: ${{ secrets.DAEMON_USER }}
+          key: ${{ secrets.DAEMON_KEY }}
+          script: |
+            set -euo pipefail
+
+            cd /opt/sentinel
+
+            # Pull latest code
+            git fetch origin
+            git reset --hard origin/main
+
+            # Run the update script
+            bash deploy/update-daemon.sh

@@ -1,0 +1,148 @@
+{
+  "TW": {
+    "name": "Taiwan", "region": "Asia",
+    "risk_score": 45, "risk_label": "Elevated",
+    "sanctions_flag": false,
+    "tariff_exposure": "medium",
+    "geo_political_risk": "China tension — potential supply chain disruption",
+    "bottleneck_risk": "Critical — dominant in advanced semiconductors",
+    "notes": "TSMC produces ~90% of world's advanced chips; any disruption catastrophic for global tech"
+  },
+  "KR": {
+    "name": "South Korea", "region": "Asia",
+    "risk_score": 35, "risk_label": "Moderate",
+    "sanctions_flag": false,
+    "tariff_exposure": "medium",
+    "geo_political_risk": "North Korea tensions; China trade dependency",
+    "bottleneck_risk": "High — major memory chip (HBM, DRAM) producer"
+  },
+  "CN": {
+    "name": "China", "region": "Asia",
+    "risk_score": 65, "risk_label": "High",
+    "sanctions_flag": true,
+    "sanctions_details": ["BIS Entity List", "UFLPA", "Chips Act export restrictions"],
+    "tariff_exposure": "high",
+    "geo_political_risk": "Taiwan Strait, trade war, technology export controls",
+    "bottleneck_risk": "Major manufacturing hub for electronics assembly"
+  },
+  "US": {
+    "name": "United States", "region": "North America",
+    "risk_score": 12, "risk_label": "Low",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "Policy stability; onshoring incentives (CHIPS Act)",
+    "bottleneck_risk": "Low — diversified economy"
+  },
+  "JP": {
+    "name": "Japan", "region": "Asia",
+    "risk_score": 18, "risk_label": "Low",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "Regional stability; chip equipment export controls alignment",
+    "bottleneck_risk": "Key in semiconductor materials and equipment"
+  },
+  "NL": {
+    "name": "Netherlands", "region": "Europe",
+    "risk_score": 15, "risk_label": "Low",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "ASML export restrictions to China — US/Dutch policy coordination",
+    "bottleneck_risk": "Critical — ASML EUV lithography monopoly"
+  },
+  "DE": {
+    "name": "Germany", "region": "Europe",
+    "risk_score": 15, "risk_label": "Low",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "Energy costs; automotive industry transition",
+    "bottleneck_risk": "Major auto manufacturing; semiconductor investments (TSMC, Intel fabs planned)"
+  },
+  "GB": {
+    "name": "United Kingdom", "region": "Europe",
+    "risk_score": 18, "risk_label": "Low",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "Post-Brexit trade adjustments",
+    "bottleneck_risk": "Low"
+  },
+  "IE": {
+    "name": "Ireland", "region": "Europe",
+    "risk_score": 12, "risk_label": "Low",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "EU corporate tax policy changes",
+    "bottleneck_risk": "Intel fab location; pharma manufacturing hub"
+  },
+  "SG": {
+    "name": "Singapore", "region": "Asia",
+    "risk_score": 15, "risk_label": "Low",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "US-China trade war intermediary position",
+    "bottleneck_risk": "Semiconductor equipment and electronics hub"
+  },
+  "MY": {
+    "name": "Malaysia", "region": "Asia",
+    "risk_score": 25, "risk_label": "Moderate",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "Semiconductor supply chain diversification beneficiary",
+    "bottleneck_risk": "Major chip packaging and testing hub"
+  },
+  "IN": {
+    "name": "India", "region": "Asia",
+    "risk_score": 35, "risk_label": "Moderate",
+    "sanctions_flag": false,
+    "tariff_exposure": "medium",
+    "geo_political_risk": "China border tensions; rapid semiconductor manufacturing push",
+    "bottleneck_risk": "Emerging electronics manufacturing; iPhone assembly expansion"
+  },
+  "VN": {
+    "name": "Vietnam", "region": "Asia",
+    "risk_score": 30, "risk_label": "Moderate",
+    "sanctions_flag": false,
+    "tariff_exposure": "medium",
+    "geo_political_risk": "China+1 supply chain diversification beneficiary",
+    "bottleneck_risk": "Growing electronics manufacturing hub"
+  },
+  "IL": {
+    "name": "Israel", "region": "Middle East",
+    "risk_score": 40, "risk_label": "Elevated",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "Regional conflict; Intel and chip design presence",
+    "bottleneck_risk": "Intel fabs; chip design and R&D center"
+  },
+  "MX": {
+    "name": "Mexico", "region": "North America",
+    "risk_score": 30, "risk_label": "Moderate",
+    "sanctions_flag": false,
+    "tariff_exposure": "medium",
+    "geo_political_risk": "USMCA trade policy; nearshoring beneficiary",
+    "bottleneck_risk": "Auto manufacturing; electronics assembly"
+  },
+  "DK": {
+    "name": "Denmark", "region": "Europe",
+    "risk_score": 10, "risk_label": "Low",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "Stable",
+    "bottleneck_risk": "Novo Nordisk GLP-1 manufacturing hub"
+  },
+  "CL": {
+    "name": "Chile", "region": "South America",
+    "risk_score": 28, "risk_label": "Moderate",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "Resource nationalism risk for lithium",
+    "bottleneck_risk": "Major lithium producer — EV battery supply chain"
+  },
+  "AU": {
+    "name": "Australia", "region": "Oceania",
+    "risk_score": 10, "risk_label": "Low",
+    "sanctions_flag": false,
+    "tariff_exposure": "low",
+    "geo_political_risk": "Stable; critical minerals supplier",
+    "bottleneck_risk": "Lithium and rare earth mining"
+  }
+}

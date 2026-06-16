@@ -25,7 +25,9 @@ Alerts and commands work 24/7 regardless of whether anyone is visiting the Strea
 │                                                          │
 │  ┌──────────────────────┐  ┌──────────────────────────┐ │
 │  │  Sentinel Daemon     │  │  Streamlit Dashboard     │ │
-│  │  (systemd service)   │  │  (on-demand web UI)      │ │
+│  │  (systemd service)   │  │  (on-demand web UI)      │ │Once you have an active subscription, run az login again and I'll be able to manage your resources. Want help with anything else in the meantime?
+
+
 │  │  Runs 24/7           │  │  Hibernates when idle    │ │
 │  │                      │  │                          │ │
 │  │  Main loop (~1 Hz):  │  │  Pages:                  │ │
