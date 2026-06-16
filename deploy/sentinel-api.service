@@ -8,7 +8,7 @@ User=sentinel
 Group=sentinel
 WorkingDirectory=/opt/sentinel
 Environment=PYTHONUNBUFFERED=1
-Environment=SENTINEL_API_KEY=CHANGE_ME
+Environment=SENTINEL_API_KEY=22680fb9c42a507353b71b07157c535bb886e03ee7bd7055
 ExecStart=/opt/sentinel/.venv/bin/python -m src.api.server
 Restart=always
 RestartSec=5
