@@ -1,4 +1,4 @@
-# 📊 Sentinel
+# 📊 Sentinel 
 
 **Fundamental Analysis Made Simple.**
 
