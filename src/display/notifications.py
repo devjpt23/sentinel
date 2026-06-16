@@ -67,8 +67,11 @@ def render_auth_ui() -> None:
                 from src.data.auth_db import delete_session
                 delete_session(token)
             # If signed in via Google OAuth, clear the OIDC state too
-            if st.user.is_logged_in:
-                st.logout()
+            try:
+                if st.user.is_logged_in:
+                    st.logout()
+            except AttributeError:
+                pass  # OAuth not configured, skip
             st.session_state.user = None
             st.session_state.session_token = None
             st.session_state.watchlist = []
@@ -78,17 +81,30 @@ def render_auth_ui() -> None:
 
     # Not logged in — show Google login + login/register expander
     # ── Google OAuth 按钮 ──────────────────────────────────
-    st.markdown(
-        '<p style="color: #8B949E; font-size: 0.8rem; margin-bottom: 4px;">Quick sign in:</p>',
-        unsafe_allow_html=True,
-    )
-    if st.button(
-        "🔵 Sign in with Google",
-        use_container_width=True,
-        key="google_login_btn",
-        help="Sign in instantly using your Google account — no password needed.",
-    ):
-        st.login("google")
+    # Only show the Google button when OAuth credentials are configured
+    # (not placeholder values). The import check prevents the
+    # StreamlitMissingAuthlibError when Authlib isn't installed.
+    _google_configured = False
+    try:
+        import authlib  # noqa: F401
+        _google_cfg = st.secrets.get("auth", {}).get("google", {})
+        _cid = _google_cfg.get("client_id", "")
+        _google_configured = bool(_cid) and "REPLACE" not in _cid
+    except ImportError:
+        pass
+
+    if _google_configured:
+        st.markdown(
+            '<p style="color: #8B949E; font-size: 0.8rem; margin-bottom: 4px;">Quick sign in:</p>',
+            unsafe_allow_html=True,
+        )
+        if st.button(
+            "🔵 Sign in with Google",
+            use_container_width=True,
+            key="google_login_btn",
+            help="Sign in instantly using your Google account — no password needed.",
+        ):
+            st.login("google")
 
     st.markdown(
         '<p style="text-align: center; color: #484F58; font-size: 0.75rem; margin: 8px 0;">— or use a password —</p>',
