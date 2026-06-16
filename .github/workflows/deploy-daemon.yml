@@ -10,6 +10,7 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    if: ${{ secrets.DAEMON_HOST != '' && secrets.DAEMON_USER != '' && secrets.DAEMON_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
 
