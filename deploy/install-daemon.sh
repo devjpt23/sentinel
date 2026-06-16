@@ -102,6 +102,17 @@ fi
 chown -R sentinel:sentinel "$INSTALL_DIR"
 
 # ------------------------------------------------------------------
+# 2b. Create runtime directories
+# ------------------------------------------------------------------
+log "Creating runtime directories"
+mkdir -p "$INSTALL_DIR/data"
+chmod 755 "$INSTALL_DIR/data"
+# Ensure home cache dir exists for yfinance caching
+CACHE_DIR="/home/sentinel/.cache/trade_proj/yf_cache"
+mkdir -p "$CACHE_DIR"
+chown -R sentinel:sentinel "/home/sentinel/.cache"
+
+# ------------------------------------------------------------------
 # 3. Create venv and install dependencies
 # ------------------------------------------------------------------
 log "Setting up Python virtual environment"

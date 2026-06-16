@@ -29,6 +29,13 @@ if [ ! -d "$INSTALL_DIR/.venv" ]; then
 fi
 
 # ------------------------------------------------------------------
+# 0. Ensure runtime directories exist
+# ------------------------------------------------------------------
+CACHE_DIR="/home/sentinel/.cache/trade_proj/yf_cache"
+mkdir -p "$CACHE_DIR"
+chown -R sentinel:sentinel "/home/sentinel/.cache" 2>/dev/null || true
+
+# ------------------------------------------------------------------
 # 1. Reinstall dependencies
 # ------------------------------------------------------------------
 log "Reinstalling dependencies"
