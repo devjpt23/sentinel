@@ -23,6 +23,7 @@ from concurrent.futures import ThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 
 from src.data.notification_db import (
     init_notification_db,
@@ -32,12 +33,14 @@ from src.data.notification_db import (
     prune_check_runs,
     prune_old_notifications,
     get_user_ids_with_watchlist,
+    get_user_bot_tokens,
 )
 from src.data.watchlist_db import load_user_watchlist
 from src.notifications.checker import (
     run_check_for_ticker,
     deliver_notifications,
 )
+from src.notifications.telegram_bot import poll_user_bot
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +115,27 @@ def start_scheduler() -> BackgroundScheduler:
         )
     logger.info(f"Scheduled startup catch-up checks for {len(user_ids)} user(s)")
 
+    # ─── Telegram bot polling ──────────────────────────────
+    # Streamlit Cloud doesn't run the daemon, so we embed a
+    # recurring polling job to process Telegram commands.
+    scheduler.add_job(
+        _telegram_poll_tick,
+        IntervalTrigger(seconds=30),
+        id="telegram_poll",
+        name="Telegram bot polling",
+        replace_existing=True,
+    )
+    logger.info("Scheduled Telegram polling every 30s")
+
+    # Fire one poll immediately on startup
+    scheduler.add_job(
+        _telegram_poll_tick,
+        "date",
+        id="telegram_startup_catchup",
+        name="Telegram startup catch-up",
+        replace_existing=True,
+    )
+
     # ─── Maintenance jobs ───────────────────────────────
 
     scheduler.add_job(
@@ -130,6 +154,17 @@ def start_scheduler() -> BackgroundScheduler:
         args=[scheduler],
         id="rescan_users",
         name="Discover and schedule checks for new users",
+        replace_existing=True,
+    )
+
+    # ─── Rescan Telegram users (daily) ─────────────────────
+
+    scheduler.add_job(
+        _rescan_telegram_users,
+        CronTrigger(hour=2, minute=37),
+        args=[scheduler],
+        id="rescan_telegram_users",
+        name="Rescan Telegram users",
         replace_existing=True,
     )
 
@@ -207,6 +242,29 @@ def _rescan_users(scheduler: BackgroundScheduler) -> None:
                 replace_existing=True,
             )
             logger.info(f"New user {user_id} scheduled: every {interval_hours}h")
+
+
+def _telegram_poll_tick() -> None:
+    """Poll all users' Telegram bots for new commands."""
+    tokens = get_user_bot_tokens()
+    for entry in tokens:
+        try:
+            poll_user_bot(entry["user_id"], entry["telegram_bot_token"])
+        except Exception:
+            logger.exception(f"Telegram poll failed for user {entry['user_id']}")
+
+
+def _rescan_telegram_users(scheduler: BackgroundScheduler) -> None:
+    """Ensure the telegram_poll job exists (redundant safety net)."""
+    if "telegram_poll" not in {j.id for j in scheduler.get_jobs()}:
+        scheduler.add_job(
+            _telegram_poll_tick,
+            IntervalTrigger(seconds=30),
+            id="telegram_poll",
+            name="Telegram bot polling",
+            replace_existing=True,
+        )
+        logger.info("Rescanned: telegram_poll job re-added")
 
 
 # ─── Public API (called from Settings page) ──────────────────
