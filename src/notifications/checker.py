@@ -20,13 +20,16 @@ from src.data.notification_db import (
     update_check_log,
     get_preferences,
     mark_delivered,
+    get_custom_alert_rule_by_id,
 )
+from src.data.push_db import get_all_active_subscriptions
 from src.data.watchlist_db import load_user_watchlist
 from src.notifications.custom_alerts import evaluate_custom_alerts
 from src.notifications.telegram_bot import (
     send_telegram_message,
     format_telegram_notification,
 )
+from src.notifications.push_sender import send_push_notifications
 
 logger = logging.getLogger(__name__)
 
@@ -141,15 +144,36 @@ def check_all_tickers_for_user(user_id: int) -> Dict[str, List[Dict]]:
 
 
 def deliver_notifications(user_id: int, notifications_by_ticker: Dict[str, List[Dict]]) -> int:
-    """Deliver all notifications via Telegram. Returns total delivered count.
-
-    Each notification is always stored in-app (DB). Delivery is attempted via
-    Telegram if the user has configured and enabled it.
-    """
+    """Deliver notifications via Telegram and Web Push. Returns total delivered count."""
     prefs = get_preferences(user_id)
     delivered = 0
 
-    # ── Telegram channel ────────────────────────────────────
+    # ── Collect affected user_ids and batch-fetch push subs ──
+    # (For current single-user flow this is just [user_id], but batch-fetching
+    # prevents N+1 queries when the daemon scales to multi-user delivery cycles.)
+    push_subs_by_user = get_all_active_subscriptions([user_id])
+    user_push_subs = push_subs_by_user.get(user_id, [])
+
+    # ── Push channel ──
+    if user_push_subs and prefs.get("push_enabled", 1):
+        for _ticker, notifications in notifications_by_ticker.items():
+            for n in notifications:
+                rule_id = n.get("rule_id")
+                if not rule_id:
+                    continue
+                rule = get_custom_alert_rule_by_id(rule_id)
+                if rule and getattr(rule, "fire_push", 1):
+                    results = send_push_notifications(
+                        subscriptions=user_push_subs,
+                        title=f"{n.get('ticker', '?')}: {n.get('title', 'Alert')}",
+                        body=n.get("body", ""),
+                        data={"ticker": n.get("ticker"), "rule_id": n.get("id"), "url": f"/company/{n.get('ticker', '')}"},
+                    )
+                    for r in results:
+                        if r["status"] == "sent":
+                            delivered += 1
+
+    # ── Telegram channel ──
     bot_token = prefs.get("telegram_bot_token", "")
     telegram_enabled = (
         bool(prefs.get("telegram_enabled"))

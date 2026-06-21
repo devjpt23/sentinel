@@ -18,9 +18,13 @@ Usage:
 """
 
 import hashlib
+import logging
 import os
 import secrets
+import smtplib
 import sqlite3
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Optional, List, Dict
 
 # Same database file as the watchlist
@@ -88,6 +92,15 @@ def init_auth_db() -> None:
             session_token TEXT PRIMARY KEY,
             user_id INTEGER NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token TEXT UNIQUE,
+            expires_at TIMESTAMP,
+            used INTEGER DEFAULT 0,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
     """)
@@ -458,3 +471,170 @@ def delete_session(session_token: str) -> None:
     conn.execute("DELETE FROM sessions WHERE session_token = ?", (session_token,))
     conn.commit()
     conn.close()
+
+
+def delete_all_sessions(user_id: int) -> int:
+    """Delete all active sessions for a user (e.g., after password reset).
+
+    Returns the number of sessions deleted.
+    """
+    conn = _get_conn()
+    cursor = conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return count
+
+
+# ─── Password Reset Tokens ────────────────────────────────────
+
+def create_password_reset_token(user_id: int) -> str:
+    """Generate a password reset token for the given user.
+
+    The token is valid for 1 hour. Returns the 64-character hex token string.
+    """
+    token = secrets.token_hex(32)
+    conn = _get_conn()
+    conn.execute(
+        """INSERT INTO password_reset_tokens (user_id, token, expires_at)
+           VALUES (?, ?, datetime('now', '+1 hour'))""",
+        (user_id, token),
+    )
+    conn.commit()
+    conn.close()
+    return token
+
+
+def get_user_from_reset_token(token: str) -> Optional[Dict]:
+    """Atomically claim and validate a password reset token.
+
+    Returns None if the token is invalid, expired, or already used.
+    Marks the token as used in the same SQL statement to prevent concurrent reuse.
+    """
+    conn = _get_conn()
+    cursor = conn.execute(
+        """UPDATE password_reset_tokens SET used = 1
+           WHERE token = ?
+             AND used = 0
+             AND expires_at > datetime('now')""",
+        (token,),
+    )
+    affected = cursor.rowcount
+    conn.commit()
+
+    if affected == 0:
+        conn.close()
+        return None
+
+    row = conn.execute(
+        """SELECT u.id, u.username
+           FROM password_reset_tokens prt
+           JOIN users u ON u.id = prt.user_id
+           WHERE prt.token = ?""",
+        (token,),
+    ).fetchone()
+    conn.close()
+    if row is None:
+        return None
+    return dict(row)
+
+
+def invalidate_reset_token(token: str) -> None:
+    """Mark a password reset token as used."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE password_reset_tokens SET used = 1 WHERE token = ?",
+        (token,),
+    )
+    conn.commit()
+    conn.close()
+
+
+def update_user_password(user_id: int, new_password: str) -> None:
+    """Hash and update a user's password in the database."""
+    hash_hex, salt = _hash_password(new_password)
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE users SET password_hash = ?, salt = ? WHERE id = ?",
+        (hash_hex, salt, user_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+# ─── Email Sending ────────────────────────────────────────────
+
+logger = logging.getLogger(__name__)
+
+
+def send_password_reset_email(email: str, reset_link: str) -> bool:
+    """Send a password reset email via SMTP.
+
+    Configured via environment variables:
+        SMTP_HOST      (default: "smtp.gmail.com")
+        SMTP_PORT      (default: 587)
+        SMTP_USER      (required)
+        SMTP_PASSWORD  (required)
+        SMTP_FROM      (default: same as SMTP_USER)
+        RESET_BASE_URL (default: "http://localhost:3000") — used to build reset_link
+
+    Returns True on success, False on failure (logs warnings on misconfiguration).
+    """
+    smtp_user = os.environ.get("SMTP_USER", "")
+    smtp_password = os.environ.get("SMTP_PASSWORD", "")
+
+    if not smtp_user or not smtp_password:
+        logger.warning(
+            "SMTP_USER or SMTP_PASSWORD not set — cannot send password reset email. "
+            "Set these environment variables to enable email delivery."
+        )
+        return False
+
+    smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_from = os.environ.get("SMTP_FROM", smtp_user)
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = "Sentinel — Password Reset"
+    msg["From"] = smtp_from
+    msg["To"] = email
+
+    # Plain text fallback
+    text_body = (
+        "You requested a password reset for your Sentinel account.\n\n"
+        f"Click the link below to set a new password:\n{reset_link}\n\n"
+        "This link expires in 1 hour.\n\n"
+        "If you did not request this, you can safely ignore this email."
+    )
+
+    # HTML version
+    html_body = f"""\
+    <html>
+      <body style="font-family: Arial, sans-serif; color: #333; padding: 20px;">
+        <h2>Sentinel — Password Reset</h2>
+        <p>You requested a password reset for your Sentinel account.</p>
+        <p><a href="{reset_link}" style="display: inline-block; padding: 10px 20px;
+           background-color: #2563eb; color: #fff; text-decoration: none;
+           border-radius: 6px;">Reset Your Password</a></p>
+        <p style="color: #666; font-size: 14px;">This link expires in 1 hour.</p>
+        <p style="color: #999; font-size: 12px;">
+          If you did not request this, you can safely ignore this email.
+        </p>
+      </body>
+    </html>
+    """
+
+    msg.attach(MIMEText(text_body, "plain"))
+    msg.attach(MIMEText(html_body, "html"))
+
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_from, [email], msg.as_string())
+        return True
+    except Exception as e:
+        logger.error("Failed to send password reset email to %s: %s", email, e)
+        return False

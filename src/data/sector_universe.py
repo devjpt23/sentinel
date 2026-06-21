@@ -116,20 +116,25 @@ def get_industries_for_sector(sector_name: str) -> list[str]:
     return industries
 
 
-def get_companies_matching(search: str) -> list[dict]:
+def get_companies_matching(search: str = "", sector: str = "", industry: str = "") -> list[dict]:
     """Broad search across ticker, name, sector, and industry.
 
     Useful for when the user types a partial company name or ticker.
+    Filters by sector and/or industry when provided.
     """
     q = search.strip().lower()
-    if not q:
-        return []
     companies = load_universe()
     results = []
     for c in companies:
-        if (q in c.get("ticker", "").lower()
-                or q in c.get("name", "").lower()
-                or q in c.get("sector", "").lower()
-                or q in c.get("industry", "").lower()):
-            results.append(c)
-    return results
+        if sector and c.get("sector", "").lower() != sector.strip().lower():
+            continue
+        if industry and c.get("industry", "").lower() != industry.strip().lower():
+            continue
+        if q:
+            if not (q in c.get("ticker", "").lower()
+                    or q in c.get("name", "").lower()
+                    or q in c.get("sector", "").lower()
+                    or q in c.get("industry", "").lower()):
+                continue
+        results.append(c)
+    return results if (q or sector or industry) else []

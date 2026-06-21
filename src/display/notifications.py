@@ -9,7 +9,7 @@ that take data and call st.markdown(..., unsafe_allow_html=True).
 """
 
 import streamlit as st
-from typing import Dict
+from typing import Dict, List
 
 from src.data.auth_db import (
     register_user,
@@ -32,6 +32,40 @@ from src.notifications.telegram_bot import (
     send_test_message as send_telegram_test,
     clear_polling_state,
 )
+
+# ─── Remote DB Routing ─────────────────────────────────────
+# Routes auth and preferences through the VPS API when configured,
+# falling back to local SQLite. Ensures Streamlit Cloud and the
+# VPS daemon share the same user/accounts database.
+
+def _remote():
+    """Lazy-lookup the remote DB client (avoid import-time circular deps)."""
+    from src.data.remote_db import get_remote_db
+    return get_remote_db()
+
+
+def _remote_get_preferences(user_id: int) -> Dict:
+    """Get preferences through remote API if available."""
+    remote = _remote()
+    if remote:
+        return remote.get_preferences(user_id)
+    return get_preferences(user_id)
+
+
+def _remote_get_notifications(user_id: int, **kwargs) -> List[Dict]:
+    """Get notifications through remote API if available."""
+    remote = _remote()
+    if remote:
+        return remote.get_notifications(user_id, **kwargs)
+    return get_notifications(user_id, **kwargs)
+
+
+def _remote_get_unread_count(user_id: int) -> int:
+    """Get unread count through remote API if available."""
+    remote = _remote()
+    if remote:
+        return remote.get_unread_count(user_id)
+    return get_unread_count(user_id)
 
 
 # ─── Auth UI ─────────────────────────────────────────────────
@@ -130,17 +164,23 @@ def _render_login_form() -> None:
             if not username or not password:
                 st.error("Enter username and password.")
             else:
-                user = login_user(username, password)
-                if user:
-                    st.session_state.user = user
-                    # Create persistent session token (survives browser refresh)
-                    from src.data.auth_db import create_session
-                    token = create_session(user["id"])
+                remote = _remote()
+                if remote:
+                    result = remote.login_user(username, password)
+                else:
+                    result = login_user(username, password)
+                if result:
+                    st.session_state.user = result
+                    # Session token comes from remote API or local create_session
+                    token = result.get("_session_token")
+                    if not token:
+                        from src.data.auth_db import create_session
+                        token = create_session(result["id"])
                     st.session_state.session_token = token
                     st.query_params["session"] = token
-                    # Load user watchlist into session state
-                    from src.data.watchlist_db import load_user_watchlist
-                    st.session_state.watchlist = load_user_watchlist(user["id"])
+                    # Load user watchlist (always through remote-aware routing)
+                    from app import _remote_load_watchlist
+                    st.session_state.watchlist = _remote_load_watchlist(result["id"])
                     st.rerun()
                 else:
                     st.error("Invalid username or password.")
@@ -166,7 +206,11 @@ def _render_register_form() -> None:
         elif password != password2:
             st.error("Passwords do not match.")
         else:
-            user = register_user(username, password, display_name=display_name or None)
+            remote = _remote()
+            if remote:
+                user = remote.register_user(username, password, display_name=display_name or None)
+            else:
+                user = register_user(username, password, display_name=display_name or None)
             if user:
                 # Migrate legacy watchlist if applicable
                 if needs_migration():
@@ -175,13 +219,15 @@ def _render_register_form() -> None:
                         st.success(f"Claimed {migrated} tickers from the shared watchlist!")
 
                 st.session_state.user = user
-                # Create persistent session token (survives browser refresh)
-                from src.data.auth_db import create_session
-                token = create_session(user["id"])
+                # Session token comes from remote API or local create_session
+                token = user.get("_session_token")
+                if not token:
+                    from src.data.auth_db import create_session
+                    token = create_session(user["id"])
                 st.session_state.session_token = token
                 st.query_params["session"] = token
-                from src.data.watchlist_db import load_user_watchlist
-                st.session_state.watchlist = load_user_watchlist(user["id"])
+                from app import _remote_load_watchlist
+                st.session_state.watchlist = _remote_load_watchlist(user["id"])
                 st.rerun()
             else:
                 st.error("Username already taken. Choose another.")
@@ -198,7 +244,7 @@ def render_notification_bell() -> None:
     if not user:
         return
 
-    unread = get_unread_count(user["id"])
+    unread = _remote_get_unread_count(user["id"])
 
     badge_html = ""
     if unread > 0:
@@ -221,7 +267,7 @@ def render_notification_bell() -> None:
 
     # Show most recent notifications in an expander
     with st.expander(f"Recent ({unread} unread)", expanded=False):
-        notifications = get_notifications(user["id"], limit=10)
+        notifications = _remote_get_notifications(user["id"], limit=10)
         if not notifications:
             st.markdown(
                 '<p style="color: #484F58; font-size: 0.8rem;">No notifications yet. '
@@ -300,7 +346,7 @@ def render_notification_preferences() -> None:
         unsafe_allow_html=True,
     )
 
-    prefs = get_preferences(user["id"])
+    prefs = _remote_get_preferences(user["id"])
 
     with st.expander("Configure", expanded=False):
         # Trigger toggles
@@ -359,7 +405,11 @@ def render_notification_preferences() -> None:
             st.info("Go to ⚙️ **Settings** to connect Telegram.")
 
         if st.button("Save Settings", use_container_width=True, key="save_prefs"):
-            set_preferences(user["id"], **new_prefs)
+            remote = _remote()
+            if remote:
+                remote.set_preferences(user["id"], **new_prefs)
+            else:
+                set_preferences(user["id"], **new_prefs)
             st.success("Settings saved.")
             st.rerun()
 
@@ -419,7 +469,7 @@ def render_settings_page() -> None:
         st.warning("Sign in to configure settings.")
         return
 
-    prefs = get_preferences(user["id"])
+    prefs = _remote_get_preferences(user["id"])
 
     # ─── Section: Telegram Notifications ──────────────────
     st.markdown("---")
@@ -452,11 +502,19 @@ def render_settings_page() -> None:
                     st.error("Failed to send test message. The bot may be disabled or blocked.")
         with col_disconnect:
             if st.button("🗑️ Disconnect", use_container_width=True, key="clear_telegram"):
-                set_preferences(
-                    user["id"],
-                    telegram_bot_token="",
-                    telegram_enabled=0,
-                )
+                remote = _remote()
+                if remote:
+                    remote.set_preferences(
+                        user["id"],
+                        telegram_bot_token="",
+                        telegram_enabled=0,
+                    )
+                else:
+                    set_preferences(
+                        user["id"],
+                        telegram_bot_token="",
+                        telegram_enabled=0,
+                    )
                 clear_polling_state(user["id"])
                 st.success("Telegram disconnected.")
                 st.rerun()
@@ -473,8 +531,12 @@ def render_settings_page() -> None:
             if st.button("🔄 Retry Discovery", use_container_width=True, key="retry_telegram_link"):
                 found_id = discover_chat_id(_telegram_token, user["id"])
                 if found_id:
-                    from src.data.auth_db import link_telegram
-                    link_telegram(user["id"], found_id)
+                    remote = _remote()
+                    if remote:
+                        remote.link_telegram(user["id"], found_id)
+                    else:
+                        from src.data.auth_db import link_telegram
+                        link_telegram(user["id"], found_id)
                     st.success(
                         f"✅ Linked! Your Telegram is now connected as `{found_id}`.\n\n"
                         f"You should receive a welcome message on Telegram shortly."
@@ -510,11 +572,19 @@ def render_settings_page() -> None:
                     st.error("Please enter your bot token.")
                 else:
                     token = bot_token_input.strip()
-                    set_preferences(
-                        user["id"],
-                        telegram_bot_token=token,
-                        telegram_enabled=1,
-                    )
+                    remote = _remote()
+                    if remote:
+                        remote.set_preferences(
+                            user["id"],
+                            telegram_bot_token=token,
+                            telegram_enabled=1,
+                        )
+                    else:
+                        set_preferences(
+                            user["id"],
+                            telegram_bot_token=token,
+                            telegram_enabled=1,
+                        )
                     # Try auto-discovery — user may have already messaged the bot
                     found_id = discover_chat_id(token, user["id"])
                     if found_id:

@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0e13;
+  --foreground: #f0f4f0;
+  --card: #111922;
+  --card-foreground: #f0f4f0;
+  --border: #1e2d3a;
+  --muted: #6b7f8e;
+  --primary: #84cc16;
+  --primary-foreground: #0a0e13;
+  --secondary: #1e2d3a;
+  --secondary-foreground: #f0f4f0;
+  --accent: #1a2a38;
+  --destructive: #ef4444;
+  --radius: 0.75rem;
+}
+
+* {
+  border-color: var(--border);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-100%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+
+.animate-marquee:hover {
+  animation-play-state: paused;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #111922;
+}
+::-webkit-scrollbar-thumb {
+  background: #2a3f52;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3a5570;
+}
+
+/* Slider styling */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  background: #1e2d3a;
+  border-radius: 3px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #84cc16;
+  margin-top: -5px;
+}
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  background: #1e2d3a;
+  border-radius: 3px;
+  border: none;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #84cc16;
+  border: none;
+}

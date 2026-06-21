@@ -8,6 +8,7 @@ dist/
 
 # Database
 watchlist.db
+sentinel.db
 
 # Private / personal
 research.md
@@ -35,4 +36,11 @@ UI_UX_EVALUATION_REPORT.md
 docs/superpowers
 ruleset.txt
 
-
+# Next.js frontend
+web/node_modules/
+web/.next/
+web/out/
+.gstack/
+.claude/skills/gstack/
+.env
+.playwright-mcp/

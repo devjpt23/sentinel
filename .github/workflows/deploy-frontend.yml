@@ -1,0 +1,74 @@
+name: Deploy Frontend
+
+on:
+  push:
+    branches: [main, migrate-to-vercel]
+    paths:
+      - 'web/**'
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Build
+        working-directory: web
+        env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:5252/api' }}
+        run: npm run build
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 20.38.10.149
+          username: sentinel
+          key: ${{ secrets.DEPLOY_KEY }}
+          source: |
+            web/.next/
+            web/public/
+            web/package.json
+            web/next.config.ts
+          target: /opt/sentinel
+          overwrite: true
+          strip_components: 1
+
+      - name: Restart sentinel-web service
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 20.38.10.149
+          username: sentinel
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -euo pipefail
+
+            cd /opt/sentinel
+
+            # Install production Node dependencies if package.json changed
+            if [ -f "package.json" ]; then
+              npm ci --omit=dev 2>/dev/null || npm install --omit=dev
+            fi
+
+            # Restart the web service
+            systemctl restart sentinel-web.service
+
+            # Verify service is healthy
+            sleep 3
+            if systemctl is-active --quiet sentinel-web.service; then
+              echo "sentinel-web restarted successfully"
+            else
+              echo "WARNING: sentinel-web failed to restart"
+              journalctl -u sentinel-web.service -n 50 --no-pager
+              exit 1
+            fi

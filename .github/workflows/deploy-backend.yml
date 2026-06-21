@@ -1,0 +1,55 @@
+name: Deploy Backend
+
+on:
+  push:
+    branches: [main, migrate-to-vercel]
+    paths:
+      - 'src/**'
+      - 'deploy/**'
+      - 'pyproject.toml'
+      - 'requirements.txt'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 20.38.10.149
+          username: sentinel
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -euo pipefail
+
+            cd /opt/sentinel
+
+            # Pull latest code
+            git fetch origin
+            git reset --hard origin/${{ github.ref_name }}
+
+            # Run the update script (reinstalls deps, restarts services)
+            bash deploy/update-daemon.sh
+
+            # Restart the API service to pick up any code changes
+            systemctl restart sentinel-api.service
+
+            # Verify both services are healthy
+            sleep 2
+            if systemctl is-active --quiet sentinel-api.service; then
+              echo "sentinel-api restarted successfully"
+            else
+              echo "WARNING: sentinel-api failed to restart"
+              journalctl -u sentinel-api.service -n 50 --no-pager
+              exit 1
+            fi
+
+            if systemctl is-active --quiet sentinel-daemon.service; then
+              echo "sentinel-daemon is running"
+            else
+              echo "WARNING: sentinel-daemon is not active"
+              journalctl -u sentinel-daemon.service -n 50 --no-pager
+              exit 1
+            fi

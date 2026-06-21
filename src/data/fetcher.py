@@ -2,16 +2,19 @@
 Data fetching layer using yfinance.
 Pulls all financial data needed for the dashboard.
 
-Rate-limiting defences (added to stop Yahoo 429 / rate-limit errors):
+Rate-limiting defences:
   1. Shared requests.Session — connection pooling + auto-retry on 429/5xx
-  2. Token-bucket rate limiter — ~4 req/s so bursts never exceed Yahoo's tolerance
+  2. Token-bucket rate limiter — ~0.8 req/s (conservative, ~2 880/hour worst-case)
   3. Persistent pickle disk cache — cuts repeat calls by ~90%, survives restarts
   4. In-memory info cache — sub-ms hot path for recently-accessed tickers
-  5. Exponential backoff + jitter on failures
-  6. Concurrent fetches via ThreadPoolExecutor for batch operations
+  5. Circuit breaker — opens after 5 consecutive 429s, blocks all live fetches for 5 min
+  6. Per-data-type cache TTLs — fundamentals cached 24h, price history 1h, info 5 min
+  7. Request counter — warns when approaching hourly limits
+  8. Sequential movers fetch — avoids burst patterns that trigger bot detection
 """
 
 import hashlib
+import logging
 import os
 import pickle
 import random
@@ -28,6 +31,8 @@ import yfinance as yf
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+_logger = logging.getLogger(__name__)
 
 # ═══════════════════════════════════════════════════════════════
 #  Shared HTTP session — connection pooling, retry on 429/5xx
@@ -58,11 +63,19 @@ def _build_session() -> requests.Session:
 
     session.headers.update({
         "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
         ),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Referer": "https://finance.yahoo.com/",
     })
 
     return session
@@ -77,12 +90,12 @@ _SESSION = _build_session()
 class _RateLimiter:
     """Simple token-bucket rate limiter, thread-safe.
 
-    4 calls/second is well within Yahoo's ~2 000 req/hour limit while
-    keeping the dashboard snappy. Combined with the disk cache, real
-    API call volume stays low.
+    0.8 calls/second (~1.25 s between calls) is conservative vs Yahoo's
+    ~2 000 req/hour limit. Combined with disk cache, real API call volume
+    stays very low.
     """
 
-    def __init__(self, calls_per_second: float = 4.0):
+    def __init__(self, calls_per_second: float = 0.8):
         self._min_interval = 1.0 / calls_per_second
         self._lock = threading.Lock()
         self._last_call = 0.0
@@ -96,7 +109,7 @@ class _RateLimiter:
                 time.sleep(wait)
             self._last_call = time.monotonic()
 
-_rate_limiter = _RateLimiter(calls_per_second=4.0)
+_rate_limiter = _RateLimiter(calls_per_second=0.8)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -164,6 +177,118 @@ def _retry_with_backoff(fn, max_retries: int = 3, base_delay: float = 0.5):
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Circuit breaker — stops all live fetches when Yahoo is blocking
+# ═══════════════════════════════════════════════════════════════
+
+class _CircuitBreaker:
+    """Globally stops API calls when Yahoo returns too many 429s.
+
+    States:
+      CLOSED    — normal operation, calls go through
+      OPEN      — too many 429s detected; skip live fetches, return stale cache only
+      HALF_OPEN — recovery period ended; allow 1 test request
+
+    Opens after 5 consecutive 429s within a 60s window.
+    Stays open for 300s (5 min), then half-opens for a single test request.
+    """
+
+    CLOSED = "closed"
+    OPEN = "open"
+    HALF_OPEN = "half_open"
+
+    def __init__(self, failure_threshold: int = 5, recovery_timeout: float = 300,
+                 window_seconds: float = 60):
+        self._state = self.CLOSED
+        self._failure_count = 0
+        self._last_failure_time = 0.0
+        self._opened_at = 0.0
+        self._failure_threshold = failure_threshold
+        self._recovery_timeout = recovery_timeout
+        self._window_seconds = window_seconds
+        self._lock = threading.Lock()
+
+    @property
+    def state(self) -> str:
+        with self._lock:
+            if self._state == self.OPEN:
+                if time.time() - self._opened_at >= self._recovery_timeout:
+                    self._state = self.HALF_OPEN
+                    _logger.warning("[CircuitBreaker] HALF_OPEN — allowing 1 test request")
+            return self._state
+
+    def allow_request(self) -> bool:
+        """Returns True if a live API call should be attempted."""
+        return self.state in (self.CLOSED, self.HALF_OPEN)
+
+    def record_success(self):
+        """Call after a successful API response — resets the breaker."""
+        with self._lock:
+            if self._state == self.HALF_OPEN:
+                _logger.info("[CircuitBreaker] CLOSED — test request succeeded, resuming normal")
+            self._state = self.CLOSED
+            self._failure_count = 0
+
+    def record_429(self):
+        """Call when a 429 response is received."""
+        with self._lock:
+            now = time.time()
+            # Reset counter if the last failure was outside the window
+            if now - self._last_failure_time > self._window_seconds:
+                self._failure_count = 0
+            self._failure_count += 1
+            self._last_failure_time = now
+            _logger.warning(
+                f"[CircuitBreaker] 429 detected ({self._failure_count}/{self._failure_threshold})"
+            )
+            if self._failure_count >= self._failure_threshold and self._state != self.OPEN:
+                self._state = self.OPEN
+                self._opened_at = now
+                _logger.error(
+                    f"[CircuitBreaker] OPEN — too many 429s, blocking live fetches for "
+                    f"{self._recovery_timeout}s"
+                )
+
+    def record_other_failure(self):
+        """Call on non-429 failures — doesn't affect the breaker."""
+        pass
+
+_circuit_breaker = _CircuitBreaker()
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Request counter — tracks hourly volume for monitoring
+# ═══════════════════════════════════════════════════════════════
+
+class _RequestCounter:
+    """Track API call count per hour and warn when approaching limits."""
+
+    def __init__(self, warn_threshold: int = 1500):
+        self._count = 0
+        self._window_start = time.time()
+        self._warned = False
+        self._warn_threshold = warn_threshold
+        self._lock = threading.Lock()
+
+    def increment(self) -> int:
+        with self._lock:
+            now = time.time()
+            if now - self._window_start >= 3600:
+                self._count = 0
+                self._window_start = now
+                self._warned = False
+            self._count += 1
+            if self._count >= self._warn_threshold and not self._warned:
+                _logger.warning(
+                    f"[RequestCounter] {self._count} requests this hour — "
+                    f"approaching Yahoo rate limit ({self._warn_threshold}+)"
+                )
+                self._warned = True
+            return self._count
+
+_request_counter = _RequestCounter()
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Cached ticker info — the workhorse of the module
 # ═══════════════════════════════════════════════════════════════
 
@@ -174,12 +299,12 @@ _INFO_MEMORY_MAXSIZE = 64
 
 
 def _cached_ticker_info(ticker: str, max_age: int = 300) -> dict:
-    """Return yfinance .info for *ticker*, with multi-layer caching.
+    """Return yfinance .info for *ticker*, with multi-layer caching + circuit breaker.
 
     Layers (checked in order):
       1. In-memory LRU   — sub-millisecond, avoids disk I/O
-      2. Disk pickle     — survives app restarts, ~1 ms
-      3. Live API call   — rate-limited + retried
+      2. Disk pickle     — survives app restarts, ~1 ms (returns stale data when circuit is OPEN)
+      3. Live API call   — rate-limited + retried (blocked when circuit is OPEN)
 
     Args:
         ticker: The ticker symbol (e.g. "AAPL").
@@ -204,15 +329,25 @@ def _cached_ticker_info(ticker: str, max_age: int = 300) -> dict:
             _evict_lru_info()
         return cached
 
-    # 3. Live fetch — rate-limited + retried
+    # 3. Live fetch — blocked by circuit breaker when Yahoo is rate-limiting
+    if not _circuit_breaker.allow_request():
+        _logger.info(f"[fetcher] Circuit breaker OPEN, returning empty info for {tkey}")
+        return {}
+
     _rate_limiter.wait()
+    _request_counter.increment()
 
     def _fetch():
-        return yf.Ticker(tkey, session=_SESSION).info or {}
+        return yf.Ticker(tkey).info or {}
 
     try:
         info = _retry_with_backoff(_fetch)
-    except Exception:
+        _circuit_breaker.record_success()
+    except Exception as e:
+        if "429" in str(e):
+            _circuit_breaker.record_429()
+        else:
+            _circuit_breaker.record_other_failure()
         info = {}
 
     # Persist
@@ -237,14 +372,14 @@ def _evict_lru_info():
 # ═══════════════════════════════════════════════════════════════
 
 def _get_ticker(ticker: str) -> yf.Ticker:
-    """Get a Ticker object wired to the shared session."""
-    return yf.Ticker(ticker, session=_SESSION)
+    """Get a Ticker object using yfinance's default session (manages auth cookies)."""
+    return yf.Ticker(ticker)
 
 
 @lru_cache(maxsize=1)
 def _get_macro_ticker(symbol: str) -> yf.Ticker:
-    """Cached macro ticker — reuses the shared session."""
-    return yf.Ticker(symbol, session=_SESSION)
+    """Cached macro ticker — uses yfinance's default session."""
+    return yf.Ticker(symbol)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -455,11 +590,19 @@ def _fetch_company_data_yf(ticker: str) -> Dict[str, Any]:
     statements = _fetch_statements(t, ticker)
 
     # --- Historical price data for sparklines ---
-    hist = t.history(period="5y")
+    hist = pd.DataFrame()
+    if _circuit_breaker.allow_request():
+        try:
+            _rate_limiter.wait()
+            _request_counter.increment()
+            hist = t.history(period="5y")
+            _circuit_breaker.record_success()
+        except Exception:
+            _circuit_breaker.record_other_failure()
     trends = _compute_trends(hist, t)
 
     # --- News ---
-    news = _fetch_news(t)
+    news = _fetch_news(t) if _circuit_breaker.allow_request() else []
 
     return {
         "company": company,
@@ -650,9 +793,15 @@ def fetch_price_growth(ticker: str) -> Optional[Dict[str, Optional[float]]]:
     """
     from datetime import timedelta, datetime, timezone
 
+    if not _circuit_breaker.allow_request():
+        return None
+
     try:
         t = _get_ticker(ticker.upper())
+        _rate_limiter.wait()
+        _request_counter.increment()
         hist = t.history(period="1y")
+        _circuit_breaker.record_success()
 
         if hist is None or hist.empty or len(hist) < 20:
             return None
@@ -686,6 +835,58 @@ def fetch_price_growth(ticker: str) -> Optional[Dict[str, Optional[float]]]:
 
     except Exception:
         return None
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Price History (OHLCV candles for charting)
+# ═══════════════════════════════════════════════════════════════
+
+def fetch_price_history(ticker: str, period: str = "1y") -> list[dict]:
+    """Fetch historical OHLCV price data for charting.
+
+    Uses yfinance Ticker.history() to get daily candlestick data.
+    Returns a list of dicts sorted by date ascending, each with:
+        date, open, high, low, close, volume
+
+    Returns an empty list if no data is available.
+    """
+    if not _circuit_breaker.allow_request():
+        return []
+    try:
+        t = _get_ticker(ticker.upper())
+        _rate_limiter.wait()
+        _request_counter.increment()
+        hist = t.history(period=period)
+        _circuit_breaker.record_success()
+
+        if hist is None or hist.empty:
+            return []
+
+        candles = []
+        for date, row in hist.iterrows():
+            # Convert Timestamp to ISO date string
+            if hasattr(date, "strftime"):
+                date_str = date.strftime("%Y-%m-%d")
+            else:
+                date_str = str(date)[:10]
+
+            close = float(row.get("Close", 0))
+            if close <= 0:
+                continue  # skip invalid rows (e.g. delisted days)
+
+            candles.append({
+                "date": date_str,
+                "open": round(float(row.get("Open", close)), 2),
+                "high": round(float(row.get("High", close)), 2),
+                "low": round(float(row.get("Low", close)), 2),
+                "close": round(close, 2),
+                "volume": int(row.get("Volume", 0)),
+            })
+
+        return candles
+
+    except Exception:
+        return []
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -790,7 +991,7 @@ def fetch_peer_metrics(peer_tickers: list[str]) -> Dict[str, Dict[str, Any]]:
     if not peer_tickers:
         return peer_data
 
-    with ThreadPoolExecutor(max_workers=min(len(peer_tickers), 6)) as executor:
+    with ThreadPoolExecutor(max_workers=min(len(peer_tickers), 2)) as executor:
         futures = {executor.submit(_fetch_one, pt): pt for pt in peer_tickers}
         for future in as_completed(futures):
             t, data = future.result()
@@ -883,7 +1084,7 @@ def compute_quick_health(info: dict) -> dict:
 #  Batch metrics (sector scans)
 # ═══════════════════════════════════════════════════════════════
 
-def fetch_batch_metrics(tickers: list[str], max_workers: int = 6) -> dict[str, Optional[dict]]:
+def fetch_batch_metrics(tickers: list[str], max_workers: int = 2) -> dict[str, Optional[dict]]:
     """Fetch key metrics for many tickers in parallel using ThreadPoolExecutor.
 
     This is a lighter fetch than fetch_company_data() — it only pulls info-level
@@ -895,7 +1096,7 @@ def fetch_batch_metrics(tickers: list[str], max_workers: int = 6) -> dict[str, O
         quick_health (score + verdict), beta, net_margin, dividend_yield
     or None if the ticker failed.
 
-    Uses 6 workers by default (down from 8) + rate-limiter waits so bursts
+    Uses 2 workers (down from 8) + rate-limiter + circuit breaker so bursts
     stay within Yahoo's tolerance. The cached-info path means repeated
     scans are near-instant.
     """
@@ -994,16 +1195,23 @@ def fetch_macro_context() -> Dict[str, Any]:
 
     def _fetch_indicator_info(symbol: str) -> Optional[dict]:
         """Fetch .info for a single macro indicator.  Returns None on failure."""
+        if not _circuit_breaker.allow_request():
+            return None
         try:
             t = _get_macro_ticker(symbol)
             _rate_limiter.wait()
-            return _retry_with_backoff(lambda: t.info or {})
-        except Exception:
+            _request_counter.increment()
+            result = _retry_with_backoff(lambda: t.info or {})
+            _circuit_breaker.record_success()
+            return result
+        except Exception as e:
+            if "429" in str(e):
+                _circuit_breaker.record_429()
             return None
 
     # Fire all 6 indicator fetches concurrently.
     symbols = ["^VIX", "^GSPC", "^TNX", "^IRX", "HYG", "DX-Y.NYB"]
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(_fetch_indicator_info, s): s for s in symbols}
         results: dict[str, Optional[dict]] = {}
         for future in as_completed(futures):
@@ -1323,15 +1531,15 @@ _MOVERS_BASKET = [
 
 
 def fetch_top_movers(basket: list[str] | None = None, top_n: int = 10,
-                     max_workers: int = 4) -> list[dict]:
+                     max_workers: int = 1) -> list[dict]:
     """Fetch daily % changes for a basket of stocks and return the top N movers.
 
     Returns a list of dicts sorted by absolute daily change (largest first):
         ticker, name, price, change_pct, direction ("up"/"down"), volume
 
-    Uses 4 workers (down from 12) + cached info so bursts are small and
-    repeated calls are near-instant. Cold cache: ~20 s for 40 tickers.
-    Warm cache: < 1 s.
+    Uses 1 worker (sequential) to avoid burst patterns that trigger Yahoo's
+    bot detection. Combined with cached info, repeated calls are near-instant.
+    Cold cache: ~60 s for 40 tickers at 0.8 req/s. Warm cache: < 1 s.
     """
     tickers = basket or _MOVERS_BASKET
 
@@ -1395,7 +1603,7 @@ def fetch_market_news(max_items: int = 10) -> list[dict]:
     all_news: list[dict] = []
     seen_titles: set[str] = set()
 
-    with ThreadPoolExecutor(max_workers=len(_MARKET_NEWS_TICKERS)) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {executor.submit(_fetch_one, t): t for t in _MARKET_NEWS_TICKERS}
         for future in as_completed(futures):
             for item in future.result():
@@ -1456,7 +1664,7 @@ def fetch_market_indices() -> list[dict]:
             return None
 
     results: list[dict] = []
-    with ThreadPoolExecutor(max_workers=len(_INDICES_CONFIG)) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         futures = {
             executor.submit(_fetch_one, name, cfg): name
             for name, cfg in _INDICES_CONFIG.items()

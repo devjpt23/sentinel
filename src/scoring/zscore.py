@@ -12,14 +12,26 @@ def compute_altman_zscore(data: Dict[str, Any]) -> Tuple[Optional[float], str, s
     Returns:
         (z_score, zone_label, explanation)
     """
+    z_score, zone, explanation, _ = compute_altman_zscore_with_components(data)
+    return z_score, zone, explanation
+
+
+def compute_altman_zscore_with_components(data: Dict[str, Any]) -> Tuple[Optional[float], str, str, Dict[str, Optional[float]]]:
+    """Compute the Altman Z-Score with individual X components.
+
+    Returns:
+        (z_score, zone_label, explanation, {x1, x2, x3, x4})
+    """
     statements = data.get("statements", {})
     balance = statements.get("balance")
     income = statements.get("income")
     market = data.get("market", {})
 
+    components: Dict[str, Optional[float]] = {"x1": None, "x2": None, "x3": None, "x4": None}
+
     try:
         if balance is None or balance.empty:
-            return None, "Unknown", "Not enough data to calculate bankruptcy risk."
+            return None, "Unknown", "Not enough data to calculate bankruptcy risk.", components
 
         # X1 = Working Capital / Total Assets
         wc = _get_latest(balance, "Working Capital")
@@ -30,19 +42,23 @@ def compute_altman_zscore(data: Dict[str, Any]) -> Tuple[Optional[float], str, s
 
         ta = _get_latest(balance, "Total Assets")
         x1 = wc / ta if wc is not None and ta and ta != 0 else 0
+        components["x1"] = round(x1, 4)
 
         # X2 = Retained Earnings / Total Assets
         re_val = _get_latest(balance, "Retained Earnings")
         x2 = re_val / ta if re_val is not None and ta and ta != 0 else 0
+        components["x2"] = round(x2, 4)
 
         # X3 = EBIT / Total Assets
         ebit = _get_latest(income, "EBIT") or _get_latest(income, "Operating Income")
         x3 = ebit / ta if ebit is not None and ta and ta != 0 else 0
+        components["x3"] = round(x3, 4)
 
         # X4 = Market Value of Equity / Total Liabilities
         mv_equity = market.get("market_cap")
         tl = _get_latest(balance, "Total Liabilities")
         x4 = mv_equity / tl if mv_equity and tl and tl != 0 else 0
+        components["x4"] = round(x4, 4)
 
         # Z'' formula (non-manufacturing): 6.56X1 + 3.26X2 + 6.72X3 + 1.05X4
         z = 6.56 * x1 + 3.26 * x2 + 6.72 * x3 + 1.05 * x4
@@ -58,10 +74,10 @@ def compute_altman_zscore(data: Dict[str, Any]) -> Tuple[Optional[float], str, s
             zone = "Distress"
             explanation = "This company shows warning signs of potential financial trouble based on its balance sheet."
 
-        return round(z, 2), zone, explanation
+        return round(z, 2), zone, explanation, components
 
     except Exception:
-        return None, "Unknown", "Could not calculate bankruptcy risk due to insufficient data."
+        return None, "Unknown", "Could not calculate bankruptcy risk due to insufficient data.", components
 
 
 def compute_zscore_normalized(z_score: Optional[float]) -> int:

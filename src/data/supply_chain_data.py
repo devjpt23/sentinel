@@ -48,57 +48,82 @@ def _valafi_get(endpoint: str, params: dict | None = None) -> dict | None:
         return None
 
 
-def fetch_supply_chain_from_valafi(ticker: str) -> list[dict]:
-    """Fetch supplier/customer relationships from Vala-Fi (SEC 10-K extraction).
+# Time-bounded cache for Vala-Fi results (respects 50 req/day limit).
+# TTL is 6 hours — SEC 10-K supply chain data doesn't change intraday.
+_VALAFI_CACHE: dict[str, tuple[list[dict], float]] = {}
+_VALAFI_CACHE_TTL = 6 * 3600  # 6 hours
 
-    Returns a list of relationship dicts in the same shape as company_links.json
-    entries, but with the Vala-Fi data mapped to our schema.
+
+def _valafi_cache_clear():
+    """Clear expired entries from the Vala-Fi cache."""
+    now = time.time()
+    expired = [k for k, (_, ts) in _VALAFI_CACHE.items() if now - ts > _VALAFI_CACHE_TTL]
+    for k in expired:
+        del _VALAFI_CACHE[k]
+
+
+def fetch_supply_chain_from_valafi(ticker: str) -> list[dict]:
+    """Fetch supply chain relationships from Vala-Fi (SEC 10-K extraction).
+
+    Results cached for 6 hours to respect the 50 requests/day API limit.
     """
-    raw = _valafi_get(f"/company/{ticker.upper()}/supply-chain")
+    ticker_u = ticker.upper()
+
+    # Check cache
+    _valafi_cache_clear()
+    if ticker_u in _VALAFI_CACHE:
+        return _VALAFI_CACHE[ticker_u][0]
+
+    raw = _valafi_get(f"/company/{ticker_u}/supply-chain")
     if not raw:
+        _VALAFI_CACHE[ticker_u] = ([], time.time())
         return []
 
     relationships: list[dict] = []
-    # Vala-Fi returns {suppliers: [...], customers: [...], competitors: [...]}
-    for supplier in raw.get("suppliers", []):
-        target = (supplier.get("ticker") or supplier.get("name", "")).upper().strip()
-        if not target or target == ticker.upper():
+
+    for item in raw.get("suppliers", []):
+        target_info = item.get("target", {})
+        source_info = item.get("source", {})
+        target = (target_info.get("ticker") or "").upper().strip()
+        source = (source_info.get("ticker") or "").upper().strip()
+        rel_type = (item.get("relationship_type") or "").lower()
+
+        if source == ticker_u:
+            other = target
+            if rel_type == "customer":
+                rtype = "customer"
+            elif rel_type == "supplier":
+                rtype = "supplier"
+            else:
+                rtype = "partner"
+        elif target == ticker_u:
+            other = source
+            if rel_type == "customer":
+                rtype = "supplier"
+            elif rel_type == "supplier":
+                rtype = "customer"
+            else:
+                rtype = "partner"
+        else:
             continue
+
+        if not other or other == ticker_u:
+            continue
+
+        evidence = item.get("evidence") or item.get("description", "")
+        confidence = item.get("confidence", 0)
+        strength = "strong" if confidence >= 0.7 else "medium" if confidence >= 0.4 else "weak"
+
         relationships.append({
-            "source": ticker.upper(),
-            "target": target,
-            "type": "supplier",
-            "description": supplier.get("description", ""),
-            "strength": "medium",
+            "source": ticker_u,
+            "target": other,
+            "type": rtype,
+            "description": evidence,
+            "strength": strength,
             "source_detail": "Vala-Fi / SEC Filing",
         })
 
-    for customer in raw.get("customers", []):
-        target = (customer.get("ticker") or customer.get("name", "")).upper().strip()
-        if not target or target == ticker.upper():
-            continue
-        relationships.append({
-            "source": ticker.upper(),
-            "target": target,
-            "type": "customer",
-            "description": customer.get("description", ""),
-            "strength": "medium",
-            "source_detail": "Vala-Fi / SEC Filing",
-        })
-
-    for competitor in raw.get("competitors", []):
-        target = (competitor.get("ticker") or competitor.get("name", "")).upper().strip()
-        if not target or target == ticker.upper():
-            continue
-        relationships.append({
-            "source": ticker.upper(),
-            "target": target,
-            "type": "competitor",
-            "description": competitor.get("description", ""),
-            "strength": "medium",
-            "source_detail": "Vala-Fi / SEC Filing",
-        })
-
+    _VALAFI_CACHE[ticker_u] = (relationships, time.time())
     return relationships
 
 

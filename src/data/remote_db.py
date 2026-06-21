@@ -131,6 +131,10 @@ class RemoteDB:
             return user
         return None
 
+    def link_telegram(self, user_id: int, chat_id: str) -> bool:
+        data = self._post(f"/api/user/{user_id}/link-telegram", {"chat_id": chat_id})
+        return bool(data and data.get("ok"))
+
     # ─── Notifications ─────────────────────────────────
     def get_notifications(self, user_id: int, limit: int = 50, unread_only: bool = False) -> List[Dict]:
         qs = f"?limit={limit}&unread_only={'true' if unread_only else 'false'}"
@@ -147,6 +151,11 @@ class RemoteDB:
 
     def set_preferences(self, user_id: int, **kwargs) -> None:
         self._post(f"/api/preferences/{user_id}", kwargs)
+
+    def get_user_bot_tokens(self) -> List[Dict]:
+        """Return all users with configured Telegram bot tokens."""
+        data = self._get("/api/bot-tokens")
+        return data.get("users", []) if data else []
 
     def is_available(self) -> bool:
         """Check if the remote API is reachable."""

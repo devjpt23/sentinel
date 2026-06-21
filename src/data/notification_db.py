@@ -145,12 +145,39 @@ def init_notification_db() -> None:
             WHERE is_read = 0;
         CREATE INDEX IF NOT EXISTS idx_check_runs_user
             ON check_runs(user_id, started_at DESC);
+        CREATE TABLE IF NOT EXISTS push_subscriptions (
+            id INTEGER PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            endpoint TEXT NOT NULL,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            browser TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            last_used TEXT,
+            active INTEGER DEFAULT 1,
+            UNIQUE(endpoint)
+        );
     """)
     # Migration: add telegram_bot_token column if upgrading from older schema
     try:
         conn.execute("ALTER TABLE notification_preferences ADD COLUMN telegram_bot_token TEXT")
     except sqlite3.OperationalError:
         pass  # column already exists
+
+    # Migration: add push/telegram fire flags to custom_alert_rules
+    try:
+        conn.execute("ALTER TABLE custom_alert_rules ADD COLUMN fire_push BOOLEAN DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE custom_alert_rules ADD COLUMN fire_telegram BOOLEAN DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE notification_preferences ADD COLUMN push_enabled BOOLEAN DEFAULT 1")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
