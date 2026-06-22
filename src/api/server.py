@@ -115,6 +115,7 @@ from src.data.push_db import (
     get_push_subscriptions_for_user,
 )
 from src.notifications.push_sender import send_push_notifications
+from src.notifications.checker import check_all_tickers_for_user, deliver_notifications
 
 logger = logging.getLogger(__name__)
 
@@ -264,6 +265,28 @@ def admin_clear_supply_chain_cache():
     cached_tickers = list(_VALAFI_CACHE.keys())
     _VALAFI_CACHE.clear()
     return jsonify({"ok": True, "cleared": cached_tickers})
+
+
+@app.route("/api/admin/run-check/<int:user_id>", methods=["POST"])
+def admin_run_check(user_id):
+    """Force an immediate alert check for a user. Bypasses daemon stagger schedule."""
+    tickers = load_user_watchlist(user_id)
+    if not tickers:
+        return jsonify({"error": "no watchlist for user"}), 400
+
+    notifications_by_ticker = check_all_tickers_for_user(user_id)
+    created = sum(len(n) for n in notifications_by_ticker.values())
+    delivered = 0
+    if notifications_by_ticker:
+        delivered = deliver_notifications(user_id, notifications_by_ticker)
+
+    return jsonify({
+        "ok": True,
+        "user_id": user_id,
+        "tickers_checked": len(tickers),
+        "notifications_created": created,
+        "notifications_delivered": delivered,
+    })
 
 
 # ─── Password Reset (no X-API-Key required, rate-limited) ─────
