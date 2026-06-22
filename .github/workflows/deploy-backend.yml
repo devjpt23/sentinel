@@ -33,6 +33,9 @@ jobs:
             # Run the update script (reinstalls deps, restarts services)
             bash deploy/update-daemon.sh
 
+            # Reload systemd in case service unit files changed
+            systemctl daemon-reload
+
             # Restart the API service to pick up any code changes
             systemctl restart sentinel-api.service
 

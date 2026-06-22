@@ -9,11 +9,11 @@ VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
 _raw_private_key = os.environ.get("VAPID_PRIVATE_KEY", "")
 VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:admin@sentinel-trader.com")
 
-# Normalize private key: wrap as PEM if it's a raw base64 key (no PEM header)
-if _raw_private_key and not _raw_private_key.startswith("-----BEGIN"):
-    VAPID_PRIVATE_KEY = f"-----BEGIN EC PRIVATE KEY-----\n{_raw_private_key}\n-----END EC PRIVATE KEY-----"
-else:
-    VAPID_PRIVATE_KEY = _raw_private_key
+# Use raw key directly — pywebpush passes it to Vapid.from_string() which
+# handles raw base64 (DER-encoded or raw EC). PEM wrapping would fool the
+# base64 decoder into including PEM header text as key material, causing
+# ASN.1 parsing errors.
+VAPID_PRIVATE_KEY = _raw_private_key
 
 PUSH_ENABLED = bool(VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY)
 

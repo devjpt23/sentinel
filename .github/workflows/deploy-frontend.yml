@@ -35,11 +35,7 @@ jobs:
           host: 20.38.10.149
           username: sentinel
           key: ${{ secrets.DEPLOY_KEY }}
-          source: |
-            web/.next/
-            web/public/
-            web/package.json
-            web/next.config.ts
+          source: web/.next/, web/public/, web/package.json, web/next.config.ts
           target: /opt/sentinel
           overwrite: true
           strip_components: 1
