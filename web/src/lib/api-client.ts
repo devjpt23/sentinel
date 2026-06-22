@@ -1,4 +1,3 @@
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5252";
 const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
 
 export interface FetchOptions extends RequestInit {
@@ -34,7 +33,7 @@ export interface MacroIndicators {
 async function fetchApi<T>(path: string, options: FetchOptions = {}): Promise<T> {
   const { params, ...rest } = options;
 
-  const url = new URL(path.startsWith("http") ? path : `${API_BASE}${path}`);
+  const url = new URL(path.startsWith("http") ? path : path, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
       url.searchParams.append(key, String(value));
