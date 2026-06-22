@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePreferences, useUpdatePreferences, useUser } from "@/hooks/use-watchlist";
 import { Send, CheckCircle2, XCircle, Loader2, Bot, Bell, User, Moon, Sun, LogOut, Globe, Eye, EyeOff, Lock } from "lucide-react";
+import { toast } from "sonner";
 import Link from "next/link";
 import { subscribeToPush, unsubscribeFromPush, getPushStatus } from "@/lib/push-notifications";
 import { logout } from "@/lib/auth";
@@ -109,6 +110,9 @@ export default function SettingsPage() {
       fscore_change: fscoreChange,
       check_interval_hours: checkInterval,
       health_delta_threshold: healthDelta,
+    }, {
+      onSuccess: () => toast.success("Preferences saved successfully"),
+      onError: () => toast.error("Failed to save preferences"),
     });
   };
 

@@ -172,7 +172,7 @@ export default function NotificationsPage() {
         {isLoading ? (<div className="p-8 space-y-3">{Array.from({ length: 5 }).map((_, i) => (<Skeleton key={i} className="h-12 w-full" />))}</div>) : (<>
           <Table>
             <TableHeader>{table.getHeaderGroups().map((hg) => (<TableRow key={hg.id}>{hg.headers.map((h) => (<TableHead key={h.id}>{h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}</TableHead>))}</TableRow>))}</TableHeader>
-            <TableBody>{table.getRowModel().rows.length === 0 ? (<TableRow><TableCell colSpan={columns.length} className="text-center text-[#6b7f8e] py-8">No notifications</TableCell></TableRow>) : table.getRowModel().rows.map((row) => (<TableRow key={row.original.id} className={row.original.read ? "" : "bg-[#1a2a38]/30"}>{row.getVisibleCells().map((cell) => (<TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>))}</TableRow>))}</TableBody>
+            <TableBody>{table.getRowModel().rows.length === 0 ? (<TableRow><TableCell colSpan={columns.length} className="text-center text-[#6b7f8e] py-8 px-4">No notifications yet. Configure alerts in Settings to receive notifications when your watched stocks trigger alerts.</TableCell></TableRow>) : table.getRowModel().rows.map((row) => (<TableRow key={row.original.id} className={row.original.read ? "" : "bg-[#1a2a38]/30"}>{row.getVisibleCells().map((cell) => (<TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>))}</TableRow>))}</TableBody>
           </Table>
           {totalPages > 1 && (
             <div className="flex items-center justify-between px-4 py-3 border-t border-[#1e2d3a]">
