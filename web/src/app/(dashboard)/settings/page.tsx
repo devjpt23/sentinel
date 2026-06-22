@@ -66,6 +66,10 @@ export default function SettingsPage() {
   const [pushTestLoading, setPushTestLoading] = useState(false);
   const [pushError, setPushError] = useState<string | null>(null);
 
+  // iOS PWA detection — web push on iOS requires the site to be installed to Home Screen
+  const isIOS = typeof navigator !== "undefined" && /iPad|iPhone|iPod/.test(navigator.userAgent);
+  const isStandalone = typeof navigator !== "undefined" && "standalone" in navigator && (navigator as unknown as Record<string, boolean>).standalone;
+
   // Load push status on mount
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -168,11 +172,30 @@ export default function SettingsPage() {
         setPushStatus("denied");
         setPushError("Browser permission denied. Enable notifications in your browser settings.");
       } else {
-        setPushError(result.reason || "Failed to enable push notifications.");
+        // Handle specific error reasons with actionable messages
+        switch (result.reason) {
+          case "dismissed":
+            setPushError("Permission request was dismissed. Please try again and allow notifications when prompted.");
+            break;
+          default:
+            setPushError(result.reason || "Failed to enable push notifications.");
+        }
       }
     } catch (e) {
       console.error("[push] subscribe failed:", e);
-      setPushError("An error occurred while enabling push notifications.");
+      if (e instanceof DOMException) {
+        if (/iPad|iPhone|iPod/.test(navigator.userAgent)) {
+          setPushError(
+            `Push subscription failed on iOS (${e.message}). Install this site as a PWA from the Share menu for push notification support.`
+          );
+        } else {
+          setPushError(`Push subscription failed: ${e.message}`);
+        }
+      } else {
+        setPushError(
+          `An unexpected error occurred: ${e instanceof Error ? e.message : "Unknown error"}`
+        );
+      }
     } finally {
       setPushLoading(false);
     }
@@ -300,6 +323,15 @@ export default function SettingsPage() {
             <p className="text-xs text-[#3a5570]">
               Push notifications are blocked by your browser. Open your browser
               settings for this site and allow notifications to re-enable.
+            </p>
+          )}
+
+          {!pushSubscribed && isIOS && !isStandalone && (
+            <p className="text-xs text-[#f59e0b] bg-[#1c1917] rounded-md p-3 border border-[#f59e0b]/20">
+              <strong>iOS Safari notice:</strong> Web push requires you to first add
+              this site to your Home Screen. Tap the Share button (square with arrow)
+              and select &ldquo;Add to Home Screen,&rdquo; then open Sentinel from
+              your Home Screen and enable web push again.
             </p>
           )}
         </CardContent>

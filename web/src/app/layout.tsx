@@ -7,6 +7,14 @@ export const metadata: Metadata = {
   title: "Sentinel — Financial Analysis Dashboard",
   description: "Professional-grade stock analysis, health scoring, and portfolio monitoring",
   manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    title: "Sentinel",
+    statusBarStyle: "default",
+  },
+  icons: {
+    apple: "/icon-192.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

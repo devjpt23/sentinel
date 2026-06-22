@@ -19,20 +19,43 @@ export async function subscribeToPush(): Promise<{
   // 2. Ensure Service Worker is registered
   const registration = await navigator.serviceWorker.ready;
 
-  // Drop any existing subscription so a key change doesn't throw InvalidStateError
-  const existing = await registration.pushManager.getSubscription();
-  if (existing) await existing.unsubscribe();
-
-  // 3. Subscribe with VAPID public key
   const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   if (!vapidKey) return { status: "error", reason: "VAPID key not configured" };
 
-  const subscription = await registration.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(vapidKey) as BufferSource,
-  });
+  // 3. Check existing subscription — avoid unnecessary unsubscribe+resubscribe
+  const existing = await registration.pushManager.getSubscription();
+  if (existing) {
+    const savedKey = localStorage.getItem("sentinel:vapidPublicKey");
+    if (savedKey === vapidKey) {
+      // Existing subscription still matches the current VAPID key — skip re-subscribe.
+      // This avoids an async gap that Safari interprets as loss of user gesture context.
+      return { status: "subscribed" };
+    }
+    // VAPID key rotated — drop the old subscription first
+    await existing.unsubscribe();
+  }
 
-  // 4. Send subscription to Next.js API (which proxies to Flask/VPS)
+  // 4. Subscribe with VAPID public key
+  let subscription: PushSubscription;
+  try {
+    subscription = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(vapidKey) as BufferSource,
+    });
+  } catch (err) {
+    const msg =
+      err instanceof DOMException && err.name === "InvalidStateError"
+        ? "Push subscription failed. On Safari, this requires a direct user gesture (click/tap)."
+        : err instanceof DOMException
+          ? `Push subscription failed (${err.name}): ${err.message}`
+          : "Push subscription failed";
+    return { status: "error", reason: msg };
+  }
+
+  // Remember this VAPID key so subsequent calls short-circuit above
+  localStorage.setItem("sentinel:vapidPublicKey", vapidKey);
+
+  // 5. Send subscription to Next.js API (which proxies to Flask/VPS)
   const resp = await fetch("/api/push/subscribe", {
     method: "POST",
     credentials: "include",
@@ -68,6 +91,7 @@ export async function unsubscribeFromPush(): Promise<{ status: "unsubscribed" | 
       await subscription.unsubscribe();
     }
 
+    localStorage.removeItem("sentinel:vapidPublicKey");
     return { status: "unsubscribed" };
   } catch {
     return { status: "error" };
