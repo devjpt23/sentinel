@@ -19,6 +19,10 @@ export async function subscribeToPush(): Promise<{
   // 2. Ensure Service Worker is registered
   const registration = await navigator.serviceWorker.ready;
 
+  // Drop any existing subscription so a key change doesn't throw InvalidStateError
+  const existing = await registration.pushManager.getSubscription();
+  if (existing) await existing.unsubscribe();
+
   // 3. Subscribe with VAPID public key
   const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
   if (!vapidKey) return { status: "error", reason: "VAPID key not configured" };

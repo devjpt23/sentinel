@@ -141,7 +141,8 @@ export default function SettingsPage() {
       } else {
         setPushError(result.reason || "Failed to enable push notifications.");
       }
-    } catch {
+    } catch (e) {
+      console.error("[push] subscribe failed:", e);
       setPushError("An error occurred while enabling push notifications.");
     } finally {
       setPushLoading(false);
