@@ -207,7 +207,7 @@ function GlobeRenderer({ pins, arcs, onEntityClick, globeFactory }: GlobeRendere
     initializedRef.current = true;
 
     globe
-      .globeImageUrl("//unpkg.com/three-globe/example/img/earth-dark.jpg")
+      .globeImageUrl("/earth-dark.jpg")
       .backgroundColor("rgba(0,0,0,0)")
       .atmosphereColor("#84cc16")
       .atmosphereAltitude(0.25)

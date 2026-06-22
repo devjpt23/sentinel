@@ -1,7 +1,7 @@
 "use client";
 
-import { use, useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
@@ -50,8 +50,9 @@ function GlobeSkeleton() {
 type SortKey = "company" | "relationship" | "country" | "risk" | "investability" | "exposure";
 type SortDir = "asc" | "desc";
 
-export default function SupplyChainPage({ params }: { params: Promise<{ ticker: string }> }) {
-  const { ticker } = use(params);
+export default function SupplyChainPage() {
+  const params = useParams();
+  const ticker = (params?.ticker as string) ?? "";
   const upperTicker = ticker.toUpperCase();
   const router = useRouter();
 
