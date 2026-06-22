@@ -4,11 +4,23 @@ import { SESSION_COOKIE_NAME } from "./src/lib/constants";
 
 // Routes that require authentication
 const PROTECTED_PATHS = ["/watchlist", "/sectors", "/screener", "/sec-filings", "/notifications", "/alerts", "/settings", "/admin", "/company"];
-const PUBLIC_PATHS = ["/login", "/oauth/callback", "/about"];
+// Routes that do not require authentication (auth pages, landing, about, etc.)
+const PUBLIC_PATHS = ["/login", "/register", "/forgot-password", "/reset-password", "/oauth/callback", "/about"];
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const sessionToken = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+
+  // If already logged in and trying to access login, redirect to dashboard
+  if (pathname === "/login" && sessionToken) {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+
+  // Allow other public routes without auth
+  const isPublic = PUBLIC_PATHS.some(
+    (p) => pathname === p || pathname.startsWith(`${p}/`)
+  );
+  if (isPublic) return NextResponse.next();
 
   // Check if the path requires auth
   const isProtected = PROTECTED_PATHS.some(
@@ -20,11 +32,6 @@ export function middleware(request: NextRequest) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(loginUrl);
-  }
-
-  // If already logged in and trying to access login, redirect to dashboard
-  if (pathname === "/login" && sessionToken) {
-    return NextResponse.redirect(new URL("/", request.url));
   }
 
   return NextResponse.next();
