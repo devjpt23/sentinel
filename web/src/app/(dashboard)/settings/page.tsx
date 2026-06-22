@@ -9,16 +9,45 @@ import { Slider } from "@/components/ui/slider";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { usePreferences, useUpdatePreferences, useUser } from "@/hooks/use-watchlist";
-import { Send, CheckCircle2, XCircle, Loader2, Bot, Bell, User, Moon, Sun, LogOut, Globe, Eye, EyeOff } from "lucide-react";
+import { Send, CheckCircle2, XCircle, Loader2, Bot, Bell, User, Moon, Sun, LogOut, Globe, Eye, EyeOff, Lock } from "lucide-react";
+import Link from "next/link";
 import { subscribeToPush, unsubscribeFromPush, getPushStatus } from "@/lib/push-notifications";
 import { logout } from "@/lib/auth";
 
 // Telegram connection states
 type TelegramState = "connected" | "waiting" | "not_connected";
 
+function AuthRequired() {
+  return (
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <Card className="max-w-md">
+        <CardHeader className="text-center">
+          <Lock className="h-12 w-12 mx-auto mb-2 text-[#6b7f8e]" />
+          <CardTitle className="text-[#f0f4f0]">Access Denied</CardTitle>
+          <CardDescription>You must be signed in to manage settings.</CardDescription>
+        </CardHeader>
+        <CardContent className="text-center">
+          <p className="text-sm text-[#6b7f8e] mb-4">Sign in or create an account to configure your settings.</p>
+          <Link href="/login" className="inline-flex items-center justify-center rounded-md text-sm font-medium h-10 px-4 py-2 bg-[#84cc16] text-[#0a0e13] hover:bg-[#74b810]">
+            Sign In
+          </Link>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   const { data: prefs, isLoading: prefsLoading } = usePreferences();
   const { data: userData, isLoading: userLoading } = useUser();
+
+  if (userLoading) {
+    return <div className="flex items-center justify-center min-h-[60vh]"><Skeleton className="h-8 w-48" /></div>;
+  }
+
+  if (!userData) {
+    return <AuthRequired />;
+  }
   const updatePrefs = useUpdatePreferences();
 
   // Telegram state
