@@ -9,6 +9,9 @@ Group=sentinel
 WorkingDirectory=/opt/sentinel
 Environment=PYTHONUNBUFFERED=1
 Environment=SENTINEL_API_KEY=22680fb9c42a507353b71b07157c535bb886e03ee7bd7055
+Environment=VAPID_PUBLIC_KEY=BBh3GiZ-5kQlhv_GpNsBX-dHH9NJZ3ZkWEwSSai2-_atLfxxx03SlnrqQI6B5v4_NemBQyv3q4_a2vx4npjv1yw
+Environment=VAPID_PRIVATE_KEY=MHcCAQEEIElZhdO/BCJAVxbSDgjXkzQe8dYGVBN+RGg7Hb7CFHo2oAoGCCqGSM49AwEHoUQDQgAEGHcaJn7mRCWG/8ak2wFf50cf00lndmRYTBJJqLb79q0t/HHHTdKWeupAjoHm/j816YFDK/erj9ra/HiemO/XLA==
+Environment=VAPID_SUBJECT=mailto:admin@sentinel-trader.com
 ExecStart=/opt/sentinel/.venv/bin/python -m src.api.server
 Restart=always
 RestartSec=5
