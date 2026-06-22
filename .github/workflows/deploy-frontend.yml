@@ -51,14 +51,6 @@ jobs:
 
             cd /opt/sentinel
 
-            # Install Node.js if not present (Ubuntu/Debian)
-            if ! command -v npm &> /dev/null; then
-              echo "Node.js not found, installing via NodeSource..."
-              curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-              sudo apt-get install -y nodejs
-              echo "Node.js $(node --version) installed"
-            fi
-
             # Install production Node dependencies if package.json changed
             if [ -f "package.json" ]; then
               npm ci --omit=dev 2>/dev/null || npm install --omit=dev
