@@ -464,7 +464,7 @@ def _compute_52w_change(info: dict) -> Optional[float]:
 #  Main company data fetch
 # ═══════════════════════════════════════════════════════════════
 
-def fetch_company_data(ticker: str) -> Dict[str, Any]:
+def fetch_company_data(ticker: str, skip_extras: bool = False) -> Dict[str, Any]:
     """Fetch all fundamental data for a given ticker.
 
     Returns a dictionary with everything the dashboard needs.
@@ -478,7 +478,7 @@ def fetch_company_data(ticker: str) -> Dict[str, Any]:
     last-resort data source so the dashboard stays usable.
     """
     try:
-        return _fetch_company_data_yf(ticker)
+        return _fetch_company_data_yf(ticker, skip_extras=skip_extras)
     except Exception:
         # Last-resort: try OpenBB before giving up entirely
         try:
@@ -491,7 +491,7 @@ def fetch_company_data(ticker: str) -> Dict[str, Any]:
         raise  # re-raise the original yfinance error if everything failed
 
 
-def _fetch_company_data_yf(ticker: str) -> Dict[str, Any]:
+def _fetch_company_data_yf(ticker: str, skip_extras: bool = False) -> Dict[str, Any]:
     """Core yfinance-based company data fetch (the original implementation)."""
     t = _get_ticker(ticker.upper())
     info = _cached_ticker_info(ticker)
@@ -591,7 +591,7 @@ def _fetch_company_data_yf(ticker: str) -> Dict[str, Any]:
 
     # --- Historical price data for sparklines ---
     hist = pd.DataFrame()
-    if _circuit_breaker.allow_request():
+    if not skip_extras and _circuit_breaker.allow_request():
         try:
             _rate_limiter.wait()
             _request_counter.increment()
@@ -602,7 +602,7 @@ def _fetch_company_data_yf(ticker: str) -> Dict[str, Any]:
     trends = _compute_trends(hist, t)
 
     # --- News ---
-    news = _fetch_news(t) if _circuit_breaker.allow_request() else []
+    news = _fetch_news(t) if not skip_extras and _circuit_breaker.allow_request() else []
 
     return {
         "company": company,

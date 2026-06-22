@@ -16,6 +16,18 @@ import secrets
 import time
 import threading
 
+# In-memory cache for expensive endpoint results
+_enriched_cache: dict[str, tuple[float, str]] = {}  # key -> (timestamp, json_response)
+_ENRICHED_CACHE_TTL = 300  # 5 minutes
+_enriched_cache_lock = threading.Lock()
+
+
+def _invalidate_enriched_cache(user_id: int) -> None:
+    key = f"enriched:{user_id}"
+    with _enriched_cache_lock:
+        _enriched_cache.pop(key, None)
+
+
 from flask import Flask, request, jsonify, abort
 from flask_cors import CORS
 
@@ -337,6 +349,7 @@ def api_add_ticker():
         return jsonify({"error": "user_id and ticker are required"}), 400
     try:
         add_user_ticker(body["user_id"], body["ticker"])
+        _invalidate_enriched_cache(body["user_id"])
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -347,13 +360,19 @@ def api_get_enriched_watchlist(user_id):
     """Return watchlist tickers enriched with price, health, risk, and growth data."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
+    cache_key = f"enriched:{user_id}"
+    with _enriched_cache_lock:
+        entry = _enriched_cache.get(cache_key)
+        if entry and time.time() - entry[0] < _ENRICHED_CACHE_TTL:
+            return jsonify(json.loads(entry[1]))
+
     tickers = load_user_watchlist(user_id)
     if not tickers:
         return jsonify({"user_id": user_id, "items": []})
 
     def enrich_one(ticker):
         try:
-            data, err = _company_data(ticker)
+            data, err = _company_data(ticker, lite=True)
             if data is None:
                 return {"ticker": ticker, "error": True}
 
@@ -397,13 +416,17 @@ def api_get_enriched_watchlist(user_id):
             result = future.result()
             items[index[result["ticker"]]] = result
 
-    return jsonify({"user_id": user_id, "items": items})
+    response = jsonify({"user_id": user_id, "items": items})
+    with _enriched_cache_lock:
+        _enriched_cache[cache_key] = (time.time(), response.get_data(as_text=True))
+    return response
 
 
 @app.route("/api/watchlist/<int:user_id>/<ticker>", methods=["DELETE"])
 def api_remove_ticker(user_id, ticker):
     try:
         remove_user_ticker(user_id, ticker)
+        _invalidate_enriched_cache(user_id)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -414,6 +437,7 @@ def api_clear_watchlist(user_id):
     """Clear entire watchlist."""
     try:
         clear_user_watchlist(user_id)
+        _invalidate_enriched_cache(user_id)
         return jsonify({"ok": True})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -496,10 +520,13 @@ def api_link_telegram(user_id):
 
 # ─── Data Endpoints ────────────────────────────────────────────
 
-def _company_data(ticker: str):
-    """Fetch company data and scores, returning (data, scores) or (None, error_response)."""
+def _company_data(ticker: str, lite: bool = False):
+    """Fetch company data and scores, returning (data, scores) or (None, error_response).
+
+    When lite=True, skips expensive extras (insider trades, SEC filings, supply chain).
+    """
     try:
-        data = fetch_company_data(ticker)
+        data = fetch_company_data(ticker, skip_extras=lite)
         scores_dict = {}
         # Compute health score
         h_score, h_verdict, fscore, _ = compute_health_score(data)
