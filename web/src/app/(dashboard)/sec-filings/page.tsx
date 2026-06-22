@@ -71,6 +71,9 @@ export default function SECFilingsPage() {
   const insiderTable = useReactTable({ data: insiderQuery.data?.insider ?? [], columns: insiderColumns, state: { sorting }, onSortingChange: setSorting, getCoreRowModel: getCoreRowModel(), getSortedRowModel: getSortedRowModel(), getPaginationRowModel: getPaginationRowModel(), initialState: { pagination: { pageSize: 20 } } });
 
   const isLoading = activeTab === "filings" ? filingsQuery.isLoading : insiderQuery.isLoading;
+  const isError = activeTab === "filings" ? filingsQuery.isError : insiderQuery.isError;
+  const error = activeTab === "filings" ? filingsQuery.error : insiderQuery.error;
+  const retry = activeTab === "filings" ? filingsQuery.refetch : insiderQuery.refetch;
 
   return (
     <div className="space-y-6">
@@ -90,30 +93,50 @@ export default function SECFilingsPage() {
       </div>
       <Tabs tabs={[{ id: "filings", label: "Filings" }, { id: "insider", label: "Insider Trading" }]} activeTab={activeTab} onTabChange={setActiveTab} />
       <div className="rounded-lg border border-[#1e2d3a]">
-        {isLoading ? (<div className="p-8 space-y-3">{Array.from({ length: 5 }).map((_, i) => (<Skeleton key={i} className="h-10 w-full" />))}</div>) : activeTab === "filings" ? (<>
+        {isLoading ? (
+          <div className="p-8 space-y-3">{Array.from({ length: 5 }).map((_, i) => (<Skeleton key={i} className="h-10 w-full" />))}</div>
+        ) : isError ? (
+          <div className="p-8 text-center space-y-3">
+            <p className="text-[#6b7f8e]">
+              Could not load {activeTab === "filings" ? "filings" : "insider trading"} data.
+            </p>
+            <p className="text-sm text-[#3a5570]">
+              {error?.message?.includes("401") || error?.message?.includes("Unauthorized")
+                ? "Authentication required to view this data. Please log in."
+                : "This could be a temporary server issue or the ticker may not have data available."}
+            </p>
+            <Button variant="outline" size="sm" onClick={() => retry()}>
+              Retry
+            </Button>
+          </div>
+        ) : activeTab === "filings" ? (<>
           <Table>
             <TableHeader>{filingsTable.getHeaderGroups().map((hg) => (<TableRow key={hg.id}>{hg.headers.map((h) => (<TableHead key={h.id}>{h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}</TableHead>))}</TableRow>))}</TableHeader>
             <TableBody>{filingsTable.getRowModel().rows.length === 0 ? (<TableRow><TableCell colSpan={filingsColumns.length} className="text-center text-[#6b7f8e] py-8">No filings found</TableCell></TableRow>) : filingsTable.getRowModel().rows.map((row) => (<TableRow key={row.id}>{row.getVisibleCells().map((cell) => (<TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>))}</TableRow>))}</TableBody>
           </Table>
-          <div className="flex items-center justify-between px-4 py-3 border-t border-[#1e2d3a]">
-            <span className="text-sm text-[#6b7f8e]">{filingsTable.getRowModel().rows.length} results</span>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => filingsTable.previousPage()} disabled={!filingsTable.getCanPreviousPage()}>Previous</Button>
-              <Button variant="outline" size="sm" onClick={() => filingsTable.nextPage()} disabled={!filingsTable.getCanNextPage()}>Next</Button>
+          {filingsTable.getRowModel().rows.length > 0 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-[#1e2d3a]">
+              <span className="text-sm text-[#6b7f8e]">{filingsTable.getRowModel().rows.length} results</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => filingsTable.previousPage()} disabled={!filingsTable.getCanPreviousPage()}>Previous</Button>
+                <Button variant="outline" size="sm" onClick={() => filingsTable.nextPage()} disabled={!filingsTable.getCanNextPage()}>Next</Button>
+              </div>
             </div>
-          </div>
+          )}
         </>) : (<>
           <Table>
             <TableHeader>{insiderTable.getHeaderGroups().map((hg) => (<TableRow key={hg.id}>{hg.headers.map((h) => (<TableHead key={h.id}>{h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}</TableHead>))}</TableRow>))}</TableHeader>
             <TableBody>{insiderTable.getRowModel().rows.length === 0 ? (<TableRow><TableCell colSpan={insiderColumns.length} className="text-center text-[#6b7f8e] py-8">No insider trades found</TableCell></TableRow>) : insiderTable.getRowModel().rows.map((row) => (<TableRow key={row.id}>{row.getVisibleCells().map((cell) => (<TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>))}</TableRow>))}</TableBody>
           </Table>
-          <div className="flex items-center justify-between px-4 py-3 border-t border-[#1e2d3a]">
-            <span className="text-sm text-[#6b7f8e]">{insiderTable.getRowModel().rows.length} results</span>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" onClick={() => insiderTable.previousPage()} disabled={!insiderTable.getCanPreviousPage()}>Previous</Button>
-              <Button variant="outline" size="sm" onClick={() => insiderTable.nextPage()} disabled={!insiderTable.getCanNextPage()}>Next</Button>
+          {insiderTable.getRowModel().rows.length > 0 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-[#1e2d3a]">
+              <span className="text-sm text-[#6b7f8e]">{insiderTable.getRowModel().rows.length} results</span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={() => insiderTable.previousPage()} disabled={!insiderTable.getCanPreviousPage()}>Previous</Button>
+                <Button variant="outline" size="sm" onClick={() => insiderTable.nextPage()} disabled={!insiderTable.getCanNextPage()}>Next</Button>
+              </div>
             </div>
-          </div>
+          )}
         </>)}
       </div>
     </div>
