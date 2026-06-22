@@ -216,8 +216,11 @@ function GlobeRenderer({ pins, arcs, onEntityClick, globeFactory }: GlobeRendere
       .arcStroke(0.5);
 
     // Auto-rotation via underlying OrbitControls (globe.gl v2.x removed .autoRotateSpeed())
-    globe.controls().autoRotate = true;
-    globe.controls().autoRotateSpeed = 0.4;
+    const ctrl = globe.controls();
+    if (ctrl) {
+      ctrl.autoRotate = true;
+      ctrl.autoRotateSpeed = 0.4;
+    }
 
     globeRef.current = globe;
 
