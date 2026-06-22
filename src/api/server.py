@@ -345,14 +345,17 @@ def api_add_ticker():
 @app.route("/api/watchlist/<int:user_id>/enriched", methods=["GET"])
 def api_get_enriched_watchlist(user_id):
     """Return watchlist tickers enriched with price, health, risk, and growth data."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     tickers = load_user_watchlist(user_id)
-    items = []
-    for ticker in tickers:
+    if not tickers:
+        return jsonify({"user_id": user_id, "items": []})
+
+    def enrich_one(ticker):
         try:
             data, err = _company_data(ticker)
             if data is None:
-                items.append({"ticker": ticker, "error": True})
-                continue
+                return {"ticker": ticker, "error": True}
 
             mkt = data.get("market", {})
             price = mkt.get("price") or 0
@@ -369,7 +372,7 @@ def api_get_enriched_watchlist(user_id):
             except Exception:
                 growth = None
 
-            items.append({
+            return {
                 "ticker": ticker,
                 "name": data.get("company", {}).get("name", ""),
                 "sector": data.get("company", {}).get("sector", ""),
@@ -379,12 +382,20 @@ def api_get_enriched_watchlist(user_id):
                 "healthScore": h_score,
                 "verdict": h_verdict,
                 "riskLabel": r_label,
-                "growth3m": growth.get("growth_3m") if growth else None,
-                "growth6m": growth.get("growth_6m") if growth else None,
-                "growth12m": growth.get("growth_12m") if growth else None,
-            })
+                "growth3m": growth.get("3m") if growth else None,
+                "growth6m": growth.get("6m") if growth else None,
+                "growth12m": growth.get("12m") if growth else None,
+            }
         except Exception:
-            items.append({"ticker": ticker, "error": True})
+            return {"ticker": ticker, "error": True}
+
+    index = {t: i for i, t in enumerate(tickers)}
+    items = [None] * len(tickers)
+    with ThreadPoolExecutor(max_workers=min(len(tickers), 8)) as pool:
+        futures = {pool.submit(enrich_one, t): t for t in tickers}
+        for future in as_completed(futures):
+            result = future.result()
+            items[index[result["ticker"]]] = result
 
     return jsonify({"user_id": user_id, "items": items})
 

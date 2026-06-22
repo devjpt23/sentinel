@@ -131,7 +131,7 @@ export default function WatchlistPage() {
       <div>
         <h1 className="text-2xl font-bold">Watchlist</h1>
         <p className="text-sm text-[#6b7f8e] mt-1">
-          {items.length} companies tracked • Click a row to view details
+          {enrichedLoading ? "Loading watchlist data..." : `${items.length} companies tracked • Click a row to view details`}
         </p>
       </div>
 
