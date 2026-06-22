@@ -104,10 +104,15 @@ export const api = {
   getSupplyChain: (ticker: string) => fetchApi<Record<string, unknown>>(`/api/data/${ticker}/supply-chain`),
 
   // User & Auth
+  /**
+   * Fetch the current user from session. Returns null (not throw) on 401
+   * so that unauthenticated users don't fill the console with spurious errors.
+   */
   getMe: async () => {
     const res = await fetch("/api/auth/me", {
       headers: { "Content-Type": "application/json" },
     });
+    if (res.status === 401) return null;
     if (!res.ok) {
       const err = await res.json().catch(() => ({ error: res.statusText }));
       throw new Error(
