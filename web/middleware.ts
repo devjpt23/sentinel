@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME } from "./src/lib/constants";
 
 // Routes that require authentication
-const PROTECTED_PATHS = ["/dashboard", "/watchlist", "/sectors", "/screener", "/sec-filings", "/notifications", "/alerts", "/settings", "/admin", "/company"];
+const PROTECTED_PATHS = ["/watchlist", "/sectors", "/screener", "/sec-filings", "/notifications", "/alerts", "/settings", "/admin", "/company"];
 const PUBLIC_PATHS = ["/login", "/oauth/callback", "/about"];
 
 export function middleware(request: NextRequest) {
