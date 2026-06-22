@@ -119,6 +119,14 @@ Auth, watchlists, alerts, preferences — all written to and read from the VPS S
 - **VPS** for Flask API + daemon (existing infrastructure)
 - nginx reverse proxy with TLS, security headers, rate limiting
 
+### Enriched Watchlist Caching
+The `GET /api/watchlist/<user_id>/enriched` endpoint is expensive — it fetches yfinance data (prices, financials, growth) for every ticker. Two mechanisms keep it fast:
+
+1. **Server-side result cache**: In-memory dict keyed by `enriched:{user_id}` with 5-min TTL and a threading lock. Cache is invalidated on watchlist add/remove/clear. Guarded by `_enriched_cache_lock` in `server.py`.
+2. **`skip_extras` mode**: `fetch_company_data(ticker, skip_extras=True)` skips fetching news and 5-year price history — data only needed on the detail page, not the watchlist table. The `_company_data(ticker, lite=True)` wrapper in `server.py` passes this through.
+
+The frontend polls every 60s (TanStack React Query `refetchInterval`). Without caching, that meant 5 uncached yfinance calls per ticker per minute — ~50 API calls per poll for a 10-ticker watchlist, taking 10-20s. With caching, cache hits return in <10ms.
+
 ## Branch Strategy
 
 - `main` — Streamlit app, deployed to Streamlit Cloud
