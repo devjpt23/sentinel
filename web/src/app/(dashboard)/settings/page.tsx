@@ -40,14 +40,6 @@ function AuthRequired() {
 export default function SettingsPage() {
   const { data: prefs, isLoading: prefsLoading } = usePreferences();
   const { data: userData, isLoading: userLoading } = useUser();
-
-  if (userLoading) {
-    return <div className="flex items-center justify-center min-h-[60vh]"><Skeleton className="h-8 w-48" /></div>;
-  }
-
-  if (!userData) {
-    return <AuthRequired />;
-  }
   const updatePrefs = useUpdatePreferences();
 
   // Telegram state
@@ -94,6 +86,14 @@ export default function SettingsPage() {
       }
     }
   }, [prefs]);
+
+  if (userLoading) {
+    return <div className="flex items-center justify-center min-h-[60vh]"><Skeleton className="h-8 w-48" /></div>;
+  }
+
+  if (!userData) {
+    return <AuthRequired />;
+  }
 
   const handleSavePrefs = () => {
     updatePrefs.mutate({
