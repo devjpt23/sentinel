@@ -19,7 +19,7 @@ SyslogIdentifier=sentinel-daemon
 # Hardening
 NoNewPrivileges=true
 ProtectSystem=strict
-ReadWritePaths=/opt/sentinel
+ReadWritePaths=/opt/sentinel /home/sentinel/.cache
 ProtectHome=false
 
 [Install]

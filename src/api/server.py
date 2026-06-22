@@ -3,7 +3,7 @@ Sentinel HTTP API — remote data access for Streamlit Cloud and Next.js SPA.
 
 A lightweight Flask server that exposes the VPS SQLite database over HTTP.
 All endpoints (except auth and CORS preflight) require the X-API-Key header.
-The server binds to localhost only — expose it externally via a reverse proxy or tunnel.
+The server binds to 0.0.0.0 (all interfaces) — nginx proxy controls external access.
 
 Usage:
     SENTINEL_API_KEY=my-secret python -m src.api.server
@@ -129,7 +129,7 @@ app = Flask(__name__)
 CORS_ORIGINS = [
     o.strip() for o in os.environ.get(
         "CORS_ORIGINS",
-        "http://localhost:3000,https://sentinel.app",
+        "http://localhost:3000,https://sentinel.app,https://web-fryhoudgw-devjpt23s-projects.vercel.app",
     ).split(",") if o.strip()
 ]
 
