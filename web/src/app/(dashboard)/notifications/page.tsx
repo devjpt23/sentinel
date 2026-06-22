@@ -20,7 +20,6 @@ import { toast } from "sonner";
 
 interface NotificationItem { id: string; ticker: string; body: string; severity: "info" | "warning" | "critical"; created_at: string; read: boolean; dismissed: boolean; }
 
-const MOCK_USER_ID = 1;
 
 function severityIcon(severity: string) {
   switch (severity) {
@@ -70,35 +69,35 @@ export default function NotificationsPage() {
   const { data: userData, isLoading: userLoading } = useUser();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["notifications", MOCK_USER_ID, unreadOnly, severityFilter, tickerFilter],
+    queryKey: ["notifications", userData?.id ?? 0, unreadOnly, severityFilter, tickerFilter],
     queryFn: () => {
       const params: Record<string, string | number | boolean> = { limit: 200 };
       if (unreadOnly) params.unread_only = true;
-      return api.get<{ notifications: NotificationItem[] }>("/api/notifications/" + MOCK_USER_ID, { params });
+      return api.get<{ notifications: NotificationItem[] }>("/api/notifications/" + (userData?.id ?? 0), { params });
     },
     refetchInterval: unreadOnly ? 60000 : undefined,
     enabled: !!userData,
   });
 
   const { data: unreadData } = useQuery({
-    queryKey: ["unread-count", MOCK_USER_ID],
-    queryFn: () => api.get<{ count: number }>("/api/notifications/" + MOCK_USER_ID + "/unread-count"),
+    queryKey: ["unread-count", userData?.id ?? 0],
+    queryFn: () => api.get<{ count: number }>("/api/notifications/" + (userData?.id ?? 0) + "/unread-count"),
     refetchInterval: 60000,
     enabled: !!userData,
   });
 
   const markReadMutation = useMutation({
-    mutationFn: (id: string) => api.post<{ ok: boolean }>("/api/notifications/" + MOCK_USER_ID + "/mark-read", { notification_id: id }),
+    mutationFn: (id: string) => api.post<{ ok: boolean }>("/api/notifications/" + (userData?.id ?? 0) + "/mark-read", { notification_id: id }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["notifications"] }); queryClient.invalidateQueries({ queryKey: ["unread-count"] }); toast.success("Marked as read"); },
   });
 
   const markAllReadMutation = useMutation({
-    mutationFn: () => api.post<{ ok: boolean }>("/api/notifications/" + MOCK_USER_ID + "/mark-all-read"),
+    mutationFn: () => api.post<{ ok: boolean }>("/api/notifications/" + (userData?.id ?? 0) + "/mark-all-read"),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["notifications"] }); queryClient.invalidateQueries({ queryKey: ["unread-count"] }); toast.success("All marked as read"); },
   });
 
   const dismissMutation = useMutation({
-    mutationFn: (id: string) => api.post<{ ok: boolean }>("/api/notifications/" + MOCK_USER_ID + "/dismiss", { notification_id: id }),
+    mutationFn: (id: string) => api.post<{ ok: boolean }>("/api/notifications/" + (userData?.id ?? 0) + "/dismiss", { notification_id: id }),
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["notifications"] }); queryClient.invalidateQueries({ queryKey: ["unread-count"] }); toast.success("Notification dismissed"); },
   });
 

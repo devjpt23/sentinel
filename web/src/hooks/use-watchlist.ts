@@ -1,14 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
+import type { User } from "@/types/api";
 
-// For now we use a placeholder user ID. In production, get this from auth context.
-const USER_ID = 1;
-
-export function useWatchlist() {
+export function useWatchlist(userId: number) {
   return useQuery({
-    queryKey: ["watchlist", USER_ID],
+    queryKey: ["watchlist", userId],
     queryFn: async () => {
-      const data = await api.getWatchlist(USER_ID);
+      const data = await api.getWatchlist(userId);
       return data.tickers ?? [];
     },
     refetchInterval: 30_000,
@@ -31,59 +29,59 @@ export interface EnrichedWatchlistItem {
   error?: boolean;
 }
 
-export function useEnrichedWatchlist() {
+export function useEnrichedWatchlist(userId: number) {
   return useQuery({
-    queryKey: ["watchlist-enriched", USER_ID],
+    queryKey: ["watchlist-enriched", userId],
     queryFn: async () => {
-      const data = await api.getEnrichedWatchlist(USER_ID);
+      const data = await api.getEnrichedWatchlist(userId);
       return data.items ?? [];
     },
     refetchInterval: 60_000, // slower, more expensive endpoint
   });
 }
 
-export function useAddToWatchlist() {
+export function useAddToWatchlist(userId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (ticker: string) => api.addToWatchlist(USER_ID, ticker),
+    mutationFn: (ticker: string) => api.addToWatchlist(userId, ticker),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["watchlist", USER_ID] });
+      qc.invalidateQueries({ queryKey: ["watchlist", userId] });
     },
   });
 }
 
-export function useRemoveFromWatchlist() {
+export function useRemoveFromWatchlist(userId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (ticker: string) => api.removeFromWatchlist(USER_ID, ticker),
+    mutationFn: (ticker: string) => api.removeFromWatchlist(userId, ticker),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["watchlist", USER_ID] });
+      qc.invalidateQueries({ queryKey: ["watchlist", userId] });
     },
   });
 }
 
-export function usePreferences() {
+export function usePreferences(userId: number) {
   return useQuery({
-    queryKey: ["preferences", USER_ID],
-    queryFn: () => api.getPreferences(USER_ID),
+    queryKey: ["preferences", userId],
+    queryFn: () => api.getPreferences(userId),
     staleTime: 60_000,
   });
 }
 
-export function useUpdatePreferences() {
+export function useUpdatePreferences(userId: number) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (prefs: Record<string, unknown>) => api.setPreferences(USER_ID, prefs),
+    mutationFn: (prefs: Record<string, unknown>) => api.setPreferences(userId, prefs),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["preferences", USER_ID] });
+      qc.invalidateQueries({ queryKey: ["preferences", userId] });
     },
   });
 }
 
 export function useUser() {
-  return useQuery({
+  return useQuery<User | null>({
     queryKey: ["user", "me"],
-    queryFn: () => api.getMe(),
+    queryFn: () => api.getMe() as Promise<User | null>,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
   });

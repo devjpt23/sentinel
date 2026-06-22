@@ -507,12 +507,31 @@ def get_signal_categories() -> List[str]:
 
 
 def get_signals_by_category(category: str) -> List[Dict]:
-    """Return signal definitions for a given category."""
-    return [
-        {"signal_id": sid, **sig}
-        for sid, sig in SIGNAL_CATALOG.items()
-        if sig["category"] == category
-    ]
+    """Return signal definitions for a given category.
+
+    Strips non-serializable fields (extractor function refs) so the
+    output can be safely JSON-serialized for the API.
+    """
+    result = []
+    for sid, sig in SIGNAL_CATALOG.items():
+        if sig["category"] == category:
+            params = sig.get("params", {})
+            result.append({
+                "id": sid,
+                "signal_id": sid,
+                "name": sig["name"],
+                "category": sig["category"],
+                "unit": sig.get("unit", ""),
+                "description": sig.get("description", ""),
+                "operators": sig.get("operators", []),
+                "value_type": "number",
+                "requires_days": bool(
+                    sig.get("requires_history", False)
+                    and params.get("days")
+                ),
+                "requires_period": bool(params.get("period")),
+            })
+    return result
 
 
 def evaluate_custom_alerts(
@@ -574,7 +593,7 @@ def _evaluate_single_rule(
     condition_descriptions: List[str] = []
 
     for cond in conditions:
-        signal_id = cond.get("signal_id", "")
+        signal_id = cond.get("signal_id") or cond.get("signal", "")
         operator = cond.get("operator", "")
         threshold = cond.get("value")
         params = cond.get("params", {})
@@ -641,7 +660,7 @@ def _evaluate_single_rule(
 
     # Save current values for ALL conditions (for next cycle's crosses detection)
     for cond in conditions:
-        signal_id = cond.get("signal_id", "")
+        signal_id = cond.get("signal_id", "") or cond.get("signal", "")
         signal_def = SIGNAL_CATALOG.get(signal_id)
         if not signal_def:
             continue
@@ -767,7 +786,7 @@ def describe_condition_for_ui(cond: Dict) -> str:
 
     Used in the rule list cards to summarize each condition without live data.
     """
-    signal_id = cond.get("signal_id", "")
+    signal_id = cond.get("signal_id", "") or cond.get("signal", "")
     operator = cond.get("operator", "")
     threshold = cond.get("value")
     signal_def = SIGNAL_CATALOG.get(signal_id, {})

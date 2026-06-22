@@ -120,7 +120,7 @@ export const api = {
       );
     }
     const data = await res.json();
-    return (data.user ?? data) as Record<string, unknown>;
+    return (data.user ?? data) as import("@/types/api").User;
   },
   logout: () => fetchApi<Record<string, unknown>>("/api/auth/token", { method: "DELETE" }),
 

@@ -6,6 +6,7 @@ import {
   useEnrichedWatchlist,
   useAddToWatchlist,
   useRemoveFromWatchlist,
+  useUser,
 } from "@/hooks/use-watchlist";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -49,9 +50,11 @@ type SortKey = "ticker" | "price" | "change_pct" | "healthScore" | "growth3m" | 
 type SortDir = "asc" | "desc";
 
 export default function WatchlistPage() {
-  const { data: enrichedItems, isLoading: enrichedLoading } = useEnrichedWatchlist();
-  const addMutation = useAddToWatchlist();
-  const removeMutation = useRemoveFromWatchlist();
+  const { data: userData } = useUser();
+  const userId = userData?.id ?? 0;
+  const { data: enrichedItems, isLoading: enrichedLoading } = useEnrichedWatchlist(userId);
+  const addMutation = useAddToWatchlist(userId);
+  const removeMutation = useRemoveFromWatchlist(userId);
   const [newTicker, setNewTicker] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("healthScore");
   const [sortDir, setSortDir] = useState<SortDir>("desc");

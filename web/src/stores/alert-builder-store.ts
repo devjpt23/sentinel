@@ -21,7 +21,7 @@ interface AlertBuilderState {
 
 const defaultCondition = (): AlertCondition => ({
   signal_category: "",
-  signal: "",
+  signal_id: "",
   operator: "",
   value: 0,
   days: undefined,

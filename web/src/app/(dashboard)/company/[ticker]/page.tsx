@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -21,9 +21,13 @@ import {
   getHealthBg, getZScoreZoneColor, getSensitivityCellColor,
 } from "@/lib/utils";
 import {
-  ArrowLeft, TrendingUp, TrendingDown, AlertTriangle, Shield,
+  ArrowLeft, Bell, TrendingUp, TrendingDown, AlertTriangle, Shield,
   DollarSign, BarChart3, FileText, ChevronDown, ChevronUp, Network, Newspaper, ExternalLink,
 } from "lucide-react";
+import { useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { api } from "@/lib/api-client";
+import { useUser } from "@/hooks/use-watchlist";
 
 type PricePeriod = "1mo" | "3mo" | "6mo" | "1y" | "2y";
 
@@ -67,6 +71,28 @@ export default function CompanyDeepDivePage() {
   const { data: priceGrowthData } = usePriceGrowth(ticker);
   const { data: macroData } = useMacro();
   const { data: indicesData } = useIndices();
+
+  // Alert bell state
+  const [showAlertMenu, setShowAlertMenu] = useState(false);
+  const alertMenuRef = useRef<HTMLDivElement>(null);
+
+  const { data: userData } = useUser();
+  const userId = (userData?.id as number) ?? 0;
+
+  const createAlert = useMutation({
+    mutationFn: (body: Record<string, unknown>) => api.post("/api/alerts/" + userId, body),
+    onSuccess: () => { toast.success("Alert created"); },
+  });
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (alertMenuRef.current && !alertMenuRef.current.contains(event.target as Node)) {
+        setShowAlertMenu(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Extract typed values from health data
   const hScore = num(healthData?.score);
@@ -113,6 +139,49 @@ export default function CompanyDeepDivePage() {
           <Network className="h-3.5 w-3.5" />
           Supply Chain
         </Link>
+        {/* Alert Bell */}
+        <div className="relative" ref={alertMenuRef}>
+          <button
+            onClick={() => userId ? setShowAlertMenu(!showAlertMenu) : undefined}
+            className={`h-8 w-8 rounded-lg border border-[#1e2d3a] flex items-center justify-center text-[#6b7f8e] hover:text-[#84cc16] hover:border-[#84cc16]/30 transition-colors ${!userId ? 'opacity-50 cursor-not-allowed' : ''}`}
+            disabled={!userId}
+            title="Create alert"
+          >
+            <Bell className="h-4 w-4" />
+          </button>
+          {showAlertMenu && (
+            <div className="absolute right-0 top-full mt-2 w-56 rounded-lg border border-[#1e2d3a] bg-[#0d1319] shadow-xl z-50">
+              <button
+                onClick={() => {
+                  createAlert.mutate({ ticker, condition: "price_change_pct < -5", name: `${ticker}: Price drops 5%` });
+                  setShowAlertMenu(false);
+                }}
+                className="w-full text-left px-4 py-2.5 text-sm text-[#c8d8e4] hover:bg-[#1a2a38] cursor-pointer transition-colors first:rounded-t-lg last:rounded-b-lg"
+              >
+                <div>Price drops 5%</div>
+                <div className="text-xs text-[#6b7f8e]">Alert when price falls 5%</div>
+              </button>
+              <button
+                onClick={() => {
+                  createAlert.mutate({ ticker, condition: "rsi < 30", name: `${ticker}: RSI oversold` });
+                  setShowAlertMenu(false);
+                }}
+                className="w-full text-left px-4 py-2.5 text-sm text-[#c8d8e4] hover:bg-[#1a2a38] cursor-pointer transition-colors first:rounded-t-lg last:rounded-b-lg"
+              >
+                <div>RSI oversold (&lt; 30)</div>
+                <div className="text-xs text-[#6b7f8e]">Alert when RSI drops below 30</div>
+              </button>
+              <Link
+                href={`/alerts?ticker=${ticker}`}
+                onClick={() => setShowAlertMenu(false)}
+                className="block w-full text-left px-4 py-2.5 text-sm text-[#c8d8e4] hover:bg-[#1a2a38] cursor-pointer transition-colors first:rounded-t-lg last:rounded-b-lg"
+              >
+                <div>Custom alert...</div>
+                <div className="text-xs text-[#6b7f8e]">Configure your own alert</div>
+              </Link>
+            </div>
+          )}
+        </div>
         <div className="text-right">
           <div className="text-2xl font-bold">
             {healthLoading ? <Skeleton className="h-8 w-24 ml-auto" /> : formatPrice(hPrice)}

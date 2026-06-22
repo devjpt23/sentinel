@@ -1307,9 +1307,12 @@ def api_alert_signals():
         signals_by_cat = {}
         for cat in categories:
             signals_by_cat[cat] = get_signals_by_category(cat)
+        flat_signals = []
+        for cat_signals in signals_by_cat.values():
+            flat_signals.extend(cat_signals)
         return jsonify({
             "categories": categories,
-            "signals": signals_by_cat,
+            "signals": flat_signals,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

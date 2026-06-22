@@ -3,9 +3,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
 import { useMarketIndices } from "@/hooks/use-market-data";
+import { useUser } from "@/hooks/use-watchlist";
 import { ArrowUpRight, ArrowDownRight, TrendingUp, TrendingDown } from "lucide-react";
-
-const MOCK_USER_ID = 1;
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
@@ -15,10 +14,10 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   );
 }
 
-function NotificationsSection() {
+function NotificationsSection({ userId }: { userId: number }) {
   const { data, isLoading } = useQuery({
-    queryKey: ["notifications", MOCK_USER_ID, 5],
-    queryFn: () => api.get<Record<string, unknown>>(`/api/notifications/${MOCK_USER_ID}`, { params: { limit: 5 } }),
+    queryKey: ["notifications", userId, 5],
+    queryFn: () => api.get<Record<string, unknown>>(`/api/notifications/${userId}`, { params: { limit: 5 } }),
     retry: false,
   });
 
@@ -126,9 +125,11 @@ function MarketPulseSection() {
 }
 
 export function RightPanel() {
+  const { data: userData } = useUser();
+  const userId = userData?.id ?? 0;
   return (
     <aside className="fixed right-0 top-0 z-30 flex h-screen w-72 flex-col border-l border-[#1e2d3a] bg-[#0d1319] overflow-y-auto">
-      <NotificationsSection />
+      <NotificationsSection userId={userId} />
       <MarketMoversSection />
       <MarketPulseSection />
     </aside>

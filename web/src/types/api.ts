@@ -195,7 +195,7 @@ export interface NotificationItem {
 
 export interface AlertCondition {
   signal_category: string;
-  signal: string;
+  signal_id: string;
   operator: string;
   value: number;
   days?: number;

@@ -38,9 +38,10 @@ function AuthRequired() {
 }
 
 export default function SettingsPage() {
-  const { data: prefs, isLoading: prefsLoading } = usePreferences();
   const { data: userData, isLoading: userLoading } = useUser();
-  const updatePrefs = useUpdatePreferences();
+  const userId = userData?.id ?? 0;
+  const { data: prefs, isLoading: prefsLoading } = usePreferences(userId);
+  const updatePrefs = useUpdatePreferences(userId);
 
   // Telegram state
   const [telegramState, setTelegramState] = useState<TelegramState>("not_connected");
