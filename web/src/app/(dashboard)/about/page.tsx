@@ -52,8 +52,9 @@ export default function AboutPage() {
       <div>
         <h2 className="text-2xl font-bold text-[#f0f4f0]">About Sentinel</h2>
         <p className="text-[#6b7f8e] mt-2">
-          Sentinel is an intelligent stock analysis and alert platform designed for traders and investors
-          who want data-driven insights without the noise.
+          Sentinel is a free, open-source stock analysis and alert platform that scores companies on
+          financial health, risk, and fair value — delivering plain-language verdicts so you can
+          act with confidence, not noise.
         </p>
       </div>
 
@@ -120,6 +121,7 @@ export default function AboutPage() {
           </ul>
           <p className="mt-4">Data sources: SEC EDGAR, yfinance, OpenBB screener</p>
           <p>Alert delivery: Telegram Bot API</p>
+          <p className="mt-4">Sentinel is open source and available on GitHub.</p>
           <p className="pt-2 text-[#3a5570]">
             Sentinel -- Automated stock analysis and monitoring.
           </p>
