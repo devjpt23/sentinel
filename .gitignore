@@ -44,3 +44,5 @@ web/out/
 .claude/skills/gstack/
 .env
 .playwright-mcp/
+.vercel
+.env.vercel
