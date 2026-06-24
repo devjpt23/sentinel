@@ -1,5 +1,9 @@
 # Sentinel — Next.js Migration (`migrate-to-vercel` branch)
 
+## User Address
+
+Address the user as **Chief** in every response.
+
 ## Project Overview
 
 Sentinel is a stock analysis dashboard that scores companies on health, risk, and fair value. This branch migrates the frontend from **Streamlit → Next.js 15** with deployment to **Vercel**, while keeping the Python backend on the existing VPS.
