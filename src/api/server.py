@@ -1306,6 +1306,13 @@ def api_get_alerts(user_id):
     """List custom alert rules."""
     enabled_only = request.args.get("enabled_only", "false").lower() == "true"
     rules = get_custom_alert_rules(user_id, enabled_only=enabled_only)
+    for rule in rules:
+        # Parse conditions from JSON string to array (SQLite stores it as text)
+        if isinstance(rule.get("conditions"), str):
+            rule["conditions"] = json.loads(rule["conditions"])
+        # Normalize DB column name to frontend field name
+        if "logic_operator" in rule:
+            rule["logic"] = rule.pop("logic_operator")
     return jsonify({"rules": rules})
 
 
@@ -1316,13 +1323,17 @@ def api_create_alert(user_id):
     if not body or "name" not in body:
         return jsonify({"error": "name is required"}), 400
     try:
+        conditions = body.get("conditions", [])
+        # Frontend sends conditions as array; DB stores as JSON string
+        if isinstance(conditions, (list, dict)):
+            conditions = json.dumps(conditions)
         rule_id = create_custom_alert_rule(
             user_id,
             name=body["name"],
             scope=body.get("scope", "watchlist"),
             ticker=body.get("ticker"),
-            conditions=body.get("conditions", "[]"),
-            logic_operator=body.get("logic_operator", "AND"),
+            conditions=conditions,
+            logic_operator=body.get("logic_operator", body.get("logic", "AND")),
             severity=body.get("severity", "info"),
         )
         return jsonify({"ok": True, "rule_id": rule_id}), 201
