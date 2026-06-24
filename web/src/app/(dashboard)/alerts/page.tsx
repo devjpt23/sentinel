@@ -151,7 +151,13 @@ function RulesList({ userId }: { userId: number }) {
     retry: 2,
   });
 
-  const rules = (data?.rules ?? []) as AlertRule[];
+  const rules = ((data?.rules ?? []) as AlertRule[]).map((r) => {
+    let conditions = r.conditions;
+    if (typeof conditions === "string") {
+      try { conditions = JSON.parse(conditions); } catch { conditions = []; }
+    }
+    return { ...r, conditions: Array.isArray(conditions) ? conditions : [] };
+  });
 
   if (isError) {
     return <AlertsPageFallback />;
