@@ -144,6 +144,17 @@ The frontend polls every 60s (TanStack React Query `refetchInterval`). Without c
 - DCF sensitivity heatmap uses CSS grid, not a chart library
 - Email notifications not yet implemented (Telegram only for now)
 
+## Workflow Health
+
+GitHub Actions workflows are critical deployment infrastructure. Before pushing any branch that modifies `.github/workflows/*`:
+1. **Syntax check** — run `act --list` or have Claude validate the YAML structure (no invalid `on:` triggers, no missing `with:` params on actions)
+2. **Secret audit** — every `${{ secrets.* }}` reference must have a corresponding secret configured in the repo
+3. **Working-directory audit** — all paths in `run:` steps must resolve correctly (e.g. `web/` for frontend, repo root for backend)
+4. **Error handling** — every SSH/script step should use `set -euo pipefail` and verify service state (like `deploy-backend.yml` does with `systemctl is-active --quiet`)
+5. **Pre-push dry-run** — before pushing workflow changes, re-read the modified workflow file and confirm all jobs, steps, and conditionals are consistent
+
+If a workflow has `on: push` to this branch, Claude must verify it won't fail on push — check for missing secrets, incorrect working directories, or shell errors in inline scripts.
+
 ## gstack
 
 For all web browsing, use the `/browse` skill from gstack. Never use `mcp__claude-in-chrome__*` tools.
