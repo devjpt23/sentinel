@@ -1,5 +1,3 @@
-const API_KEY = process.env.NEXT_PUBLIC_API_KEY || "";
-
 export interface FetchOptions extends RequestInit {
   params?: Record<string, string | number | boolean>;
 }
@@ -44,7 +42,6 @@ async function fetchApi<T>(path: string, options: FetchOptions = {}): Promise<T>
     ...rest,
     headers: {
       "Content-Type": "application/json",
-      ...(API_KEY ? { "X-API-Key": API_KEY } : {}),
       ...rest.headers,
     },
   });

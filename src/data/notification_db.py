@@ -24,10 +24,6 @@ _DB_PATH = os.path.join(
     "watchlist.db",
 )
 
-# ─── Constants ──────────────────────────────────────────
-_DEFAULT_SUPPRESSION_MINUTES = 0  # hysteresis resets immediately when condition resolves
-
-
 def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(_DB_PATH)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -160,6 +156,8 @@ def init_notification_db() -> None:
             active INTEGER DEFAULT 1,
             UNIQUE(endpoint)
         );
+        CREATE INDEX IF NOT EXISTS idx_push_sub_user
+            ON push_subscriptions(user_id);
     """)
     # Migration: add telegram_bot_token column if upgrading from older schema
     try:
