@@ -24,6 +24,9 @@ _DB_PATH = os.path.join(
     "watchlist.db",
 )
 
+# ─── Constants ──────────────────────────────────────────
+_DEFAULT_SUPPRESSION_MINUTES = 0  # hysteresis resets immediately when condition resolves
+
 
 def _get_conn() -> sqlite3.Connection:
     conn = sqlite3.connect(_DB_PATH)
@@ -178,6 +181,16 @@ def init_notification_db() -> None:
     except sqlite3.OperationalError:
         pass
 
+    # Migration: add hysteresis columns to custom_alert_rules
+    try:
+        conn.execute("ALTER TABLE custom_alert_rules ADD COLUMN currently_triggered BOOLEAN DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE custom_alert_rules ADD COLUMN last_triggered_at TIMESTAMP")
+    except sqlite3.OperationalError:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -198,12 +211,29 @@ def get_preferences(user_id: int) -> Dict:
            WHERE np.user_id = ?""",
         (user_id,),
     ).fetchone()
-    conn.close()
 
     if row is None:
         _create_default_preferences(user_id)
-        return get_preferences(user_id)
+        # Retry once — if still missing, user may not exist in users table
+        conn.close()
+        conn = _get_conn()
+        row = conn.execute(
+            """SELECT np.*, u.telegram_chat_id
+               FROM notification_preferences np
+               JOIN users u ON u.id = np.user_id
+               WHERE np.user_id = ?""",
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            conn.close()
+            raise RuntimeError(
+                f"Cannot create preferences for user_id={user_id}. "
+                f"User may not exist in users table."
+            )
+        conn.close()
+        return dict(row)
 
+    conn.close()
     return dict(row)
 
 
@@ -540,6 +570,66 @@ def get_user_ids_with_watchlist() -> List[int]:
     return [r[0] for r in rows]
 
 
+def get_user_ids_needing_checks() -> List[int]:
+    """Return user IDs that need daemon attention.
+
+    Includes users with a watchlist AND/OR active custom alert rules.
+    This ensures custom-alert-only users are not silently excluded.
+    """
+    conn = _get_conn()
+    rows = conn.execute("""
+        SELECT DISTINCT user_id FROM user_watchlist
+        UNION
+        SELECT DISTINCT user_id FROM custom_alert_rules WHERE enabled = 1
+    """).fetchall()
+    conn.close()
+    return [r[0] for r in rows]
+
+
+def get_all_active_alerts_grouped_by_ticker() -> Dict[str, List[Dict]]:
+    """Return ALL enabled custom alert rules grouped by ticker.
+
+    Returns ``{ticker: [rule_dict, ...], ...}``. Watchlist-scoped rules
+    are expanded to every ticker in the user's watchlist. Single-scope
+    rules are grouped by their specific ticker.
+
+    Rules without any matching ticker data (no watchlist, no ticker set)
+    are excluded.
+    """
+    conn = _get_conn()
+    # Watchlist-scoped rules: expand to every ticker in the user's watchlist
+    watch_rules = conn.execute(
+        """SELECT r.*, w.ticker AS wticker
+           FROM custom_alert_rules r
+           JOIN user_watchlist w ON w.user_id = r.user_id
+           WHERE r.enabled = 1 AND r.scope = 'watchlist'"""
+    ).fetchall()
+
+    # Single-scope rules: use the rule's own ticker
+    single_rules = conn.execute(
+        """SELECT r.*, r.ticker AS wticker
+           FROM custom_alert_rules r
+           WHERE r.enabled = 1 AND r.scope = 'single' AND r.ticker IS NOT NULL"""
+    ).fetchall()
+    conn.close()
+
+    grouped: Dict[str, List[Dict]] = {}
+    for row in watch_rules:
+        d = dict(row)
+        ticker = d.pop("wticker", "").upper()
+        if not ticker:
+            continue
+        grouped.setdefault(ticker, []).append(d)
+    for row in single_rules:
+        d = dict(row)
+        ticker = d.pop("wticker", "").upper()
+        if not ticker:
+            continue
+        grouped.setdefault(ticker, []).append(d)
+
+    return grouped
+
+
 # ─── Custom Alert Rules CRUD ──────────────────────────────────
 
 def get_custom_alert_rules(user_id: int, enabled_only: bool = True) -> List[Dict]:
@@ -605,6 +695,10 @@ def create_custom_alert_rule(
 def update_custom_alert_rule(rule_id: int, **kwargs) -> None:
     """Update fields of an existing custom alert rule.
 
+    When conditions or logic_operator change, clears the trigger
+    state and deletes stale snapshots so the rule doesn't re-fire
+    on stale data.
+
     Example:
         update_custom_alert_rule(rule_id, name="New Name", enabled=False)
     """
@@ -624,6 +718,23 @@ def update_custom_alert_rule(rule_id: int, **kwargs) -> None:
         f"UPDATE custom_alert_rules SET {', '.join(set_clauses)} WHERE id = ?",
         values,
     )
+
+    # Reset trigger state when conditions change
+    if any(k in kwargs for k in ("conditions", "logic_operator")):
+        conn.execute(
+            "UPDATE custom_alert_rules SET currently_triggered = 0, last_triggered_at = NULL WHERE id = ?",
+            (rule_id,),
+        )
+        # Clear snapshots for this rule's user (all signals, all tickers)
+        user_row = conn.execute(
+            "SELECT user_id FROM custom_alert_rules WHERE id = ?", (rule_id,)
+        ).fetchone()
+        if user_row:
+            conn.execute(
+                "DELETE FROM custom_alert_snapshots WHERE user_id = ?",
+                (user_row[0],),
+            )
+
     conn.commit()
     conn.close()
 
@@ -637,12 +748,30 @@ def delete_custom_alert_rule(rule_id: int) -> None:
 
 
 def toggle_custom_alert_rule(rule_id: int, enabled: bool) -> None:
-    """Enable or disable a custom alert rule."""
+    """Enable or disable a custom alert rule.
+
+    When disabling, clears the trigger state so re-enabling doesn't
+    immediately re-fire on stale data.
+    """
     conn = _get_conn()
     conn.execute(
         "UPDATE custom_alert_rules SET enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
         (int(enabled), rule_id),
     )
+    if not enabled:
+        conn.execute(
+            "UPDATE custom_alert_rules SET currently_triggered = 0, last_triggered_at = NULL WHERE id = ?",
+            (rule_id,),
+        )
+        # Also clear signal snapshots for this user
+        user_row = conn.execute(
+            "SELECT user_id FROM custom_alert_rules WHERE id = ?", (rule_id,)
+        ).fetchone()
+        if user_row:
+            conn.execute(
+                "DELETE FROM custom_alert_snapshots WHERE user_id = ?",
+                (user_row[0],),
+            )
     conn.commit()
     conn.close()
 

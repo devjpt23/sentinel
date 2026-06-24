@@ -53,6 +53,25 @@ class TestHealthEndpoint:
             assert "published" in item, "news item missing 'published'"
 
 
+class TestAdminEndpoints:
+    """Admin endpoints for triggering alert checks."""
+
+    def test_reconciliation_tick_returns_ok(self, client):
+        """POST /api/admin/reconciliation-tick must return 200 with ok=True."""
+        resp = client.post(
+            "/api/admin/reconciliation-tick",
+            headers={"X-API-Key": "test-key"},
+        )
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["ok"] is True
+
+    def test_reconciliation_tick_requires_auth(self, client):
+        """Reconciliation endpoint requires X-API-Key header."""
+        resp = client.post("/api/admin/reconciliation-tick")
+        assert resp.status_code == 401
+
+
 class TestSupplyChainEndpoint:
     """Supply chain endpoint must return curated + Vala-Fi merged data."""
 

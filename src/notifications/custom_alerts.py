@@ -22,6 +22,7 @@ from src.data.notification_db import (
     get_matching_custom_alert_rules,
     get_custom_alert_snapshot,
     save_custom_alert_snapshot,
+    update_custom_alert_rule,
 )
 
 logger = logging.getLogger(__name__)
@@ -498,6 +499,23 @@ _CROSS_OPERATORS = {
 }
 
 
+def _build_merged_params(signal_def: Dict, condition_params: Dict) -> Dict:
+    """Merge signal-level default params with per-condition overrides.
+
+    Signal params come in two styles:
+    - Dict-style:  ``{"days": {"type": "int", "default": 1}}``
+    - Static:      ``{"score_key": "health_score"}``
+    """
+    merged = {}
+    for k, v in signal_def.get("params", {}).items():
+        if isinstance(v, dict):
+            default_val = v.get("default", v)
+            merged[k] = condition_params.get(k, default_val)
+        else:
+            merged[k] = condition_params.get(k, v)
+    return merged
+
+
 # ─── Public API ───────────────────────────────────────────────
 
 def get_signal_categories() -> List[str]:
@@ -535,25 +553,37 @@ def get_signals_by_category(category: str) -> List[Dict]:
 
 
 def evaluate_custom_alerts(
-    user_id: int, ticker: str, data: Dict, scores: Dict
+    user_id: int, ticker: str, data: Dict, scores: Dict,
+    history_override: Optional[pd.DataFrame] = None,
 ) -> List[Dict]:
     """Evaluate all enabled custom alert rules for a user+ticker.
 
     Called from checker.py's run_check_for_ticker() after the built-in
     comparisons. Returns a list of notification dicts ready for create_notification().
 
+    When *history_override* is provided (from a reconciliation tick), the
+    internal history cache is pre-populated with that DataFrame so no
+    redundant yfinance calls are made. In normal mode (the default), a
+    fresh cache is created per call.
+
     Args:
         user_id: The user to evaluate rules for.
         ticker: The stock ticker being checked.
-        data: Full fetch_company_data() output dict.
+        data: Full fetch_company_data() output dict (normal mode) or a
+            minimal dict with at least a ``market`` key (reconciliation mode).
         scores: Flat score dict from checker._compute_scores().
+        history_override: Pre-fetched OHLCV DataFrame. Skips yfinance calls.
 
     Returns:
         List of notification dicts with keys: type, severity, title, body,
-        old_value, new_value.
+        old_value, new_value, rule_id.
     """
     global _history_cache
-    _history_cache = {}  # fresh cache per check cycle
+    if history_override is not None:
+        # Reconciliation mode: use pre-fetched data, no cache clear
+        _history_cache[ticker] = history_override
+    else:
+        _history_cache = {}  # fresh cache per check cycle
 
     rules = get_matching_custom_alert_rules(user_id, ticker, enabled_only=True)
     if not rules:
@@ -565,7 +595,24 @@ def evaluate_custom_alerts(
         try:
             result = _evaluate_single_rule(rule, data, scores, user_id, ticker)
             if result:
-                notifications.append(result)
+                # Hysteresis: don't re-fire while currently_triggered is True.
+                # The rule must reset (condition becomes false) before it can
+                # fire again. This prevents notification spam for standard
+                # operators (>, <, >=, <=, ==, touches_upper, touches_lower).
+                if not rule.get("currently_triggered"):
+                    update_custom_alert_rule(
+                        rule["id"],
+                        currently_triggered=1,
+                    )
+                    notifications.append(result)
+            else:
+                # Condition not met this cycle — reset trigger state so the
+                # rule can fire again when the condition re-activates.
+                if rule.get("currently_triggered"):
+                    update_custom_alert_rule(
+                        rule["id"],
+                        currently_triggered=0,
+                    )
         except Exception:
             logger.warning(
                 f"Custom alert rule '{rule.get('name', rule['id'])}' "
@@ -607,22 +654,8 @@ def _evaluate_single_rule(
         if signal_def.get("requires_history") and history is None:
             history = _get_history(ticker)
 
-        # Merge signal-level params with condition params
-        merged_params = dict(signal_def.get("params", {}))
-        # Extract defaults for param specs
-        merged_params = {
-            k: params.get(k, v.get("default", v) if isinstance(v, dict) else v)
-            for k, v in merged_params.items()
-        }
-        # Also carry internal keys like score_key and data_key
-        for k, v in signal_def.get("params", {}).items():
-            if isinstance(v, dict) and "default" not in v and k not in merged_params:
-                # static params like score_key, data_key
-                if not isinstance(v, dict):
-                    merged_params[k] = v
-                elif "default" in v:
-                    merged_params[k] = params.get(k, v["default"])
-                # else skip — no default means required from condition
+        # Merge signal-level params with condition overrides
+        merged_params = _build_merged_params(signal_def, params)
 
         # Extract current value
         extractor = signal_def["extractor"]
@@ -665,17 +698,7 @@ def _evaluate_single_rule(
         if not signal_def:
             continue
         params = cond.get("params", {})
-        merged_params = dict(signal_def.get("params", {}))
-        merged_params = {
-            k: params.get(k, v.get("default", v) if isinstance(v, dict) else v)
-            for k, v in merged_params.items()
-        }
-        for k, v in signal_def.get("params", {}).items():
-            if isinstance(v, dict) and "default" not in v and k not in merged_params:
-                if not isinstance(v, dict):
-                    merged_params[k] = v
-                elif "default" in v:
-                    merged_params[k] = params.get(k, v["default"])
+        merged_params = _build_merged_params(signal_def, params)
 
         try:
             val = signal_def["extractor"](data, scores, (history if history is not None else pd.DataFrame()), merged_params)
@@ -706,14 +729,7 @@ def _evaluate_single_rule(
         if not sd:
             continue
         cp = cond.get("params", {})
-        mp = dict(sd.get("params", {}))
-        mp = {k: cp.get(k, v.get("default", v) if isinstance(v, dict) else v) for k, v in mp.items()}
-        for k, v in sd.get("params", {}).items():
-            if isinstance(v, dict) and "default" not in v and k not in mp:
-                if not isinstance(v, dict):
-                    mp[k] = v
-                elif "default" in v:
-                    mp[k] = cp.get(k, v["default"])
+        mp = _build_merged_params(sd, cp)
         try:
             cv = sd["extractor"](data, scores, (history if history is not None else pd.DataFrame()), mp)
             if cv is not None:
@@ -728,6 +744,7 @@ def _evaluate_single_rule(
         "body": body,
         "old_value": "",
         "new_value": json.dumps(value_map),
+        "rule_id": rule["id"],
     }
 
 

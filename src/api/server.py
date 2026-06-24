@@ -116,6 +116,7 @@ from src.data.push_db import (
 )
 from src.notifications.push_sender import send_push_notifications
 from src.notifications.checker import check_all_tickers_for_user, deliver_notifications
+from src.notifications.daemon import reconciliation_tick
 
 logger = logging.getLogger(__name__)
 
@@ -270,23 +271,47 @@ def admin_clear_supply_chain_cache():
 @app.route("/api/admin/run-check/<int:user_id>", methods=["POST"])
 def admin_run_check(user_id):
     """Force an immediate alert check for a user. Bypasses daemon stagger schedule."""
-    tickers = load_user_watchlist(user_id)
-    if not tickers:
-        return jsonify({"error": "no watchlist for user"}), 400
+    from src.data.notification_db import get_custom_alert_rules
 
-    notifications_by_ticker = check_all_tickers_for_user(user_id)
+    tickers = load_user_watchlist(user_id)
+    has_custom_alerts = bool(get_custom_alert_rules(user_id))
+
+    if not tickers and not has_custom_alerts:
+        return jsonify({"error": "user has no watchlist and no custom alerts"}), 400
+
+    results = {}
+    if tickers:
+        notifications_by_ticker = check_all_tickers_for_user(user_id)
+    else:
+        notifications_by_ticker = {}
+
+    # Evaluate custom alerts for all tickers in the user's watchlist
     created = sum(len(n) for n in notifications_by_ticker.values())
-    delivered = 0
     if notifications_by_ticker:
-        delivered = deliver_notifications(user_id, notifications_by_ticker)
+        deliver_notifications(user_id, notifications_by_ticker)
+    results["watchlist_checks"] = {
+        "tickers_checked": len(tickers),
+        "notifications_created": created,
+    }
 
     return jsonify({
         "ok": True,
         "user_id": user_id,
-        "tickers_checked": len(tickers),
-        "notifications_created": created,
-        "notifications_delivered": delivered,
+        **results,
+        "notifications_delivered": created,
     })
+
+
+@app.route("/api/admin/reconciliation-tick", methods=["POST"])
+def admin_reconciliation_tick():
+    """Force an immediate reconciliation tick for all custom alerts.
+
+    Bypasses the 60-second daemon cycle. Useful for testing or
+    triggering an immediate evaluation of all active custom alert
+    rules across all users.
+    """
+    reconciliation_tick()
+    return jsonify({"ok": True, "message": "Reconciliation tick completed"})
 
 
 # ─── Password Reset (no X-API-Key required, rate-limited) ─────

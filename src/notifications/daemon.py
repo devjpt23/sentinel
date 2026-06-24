@@ -13,20 +13,26 @@ import sys
 import time
 import logging
 from datetime import datetime
+from typing import Dict, List
+
+import pandas as pd
 
 from src.data.auth_db import init_auth_db
 from src.data.notification_db import (
     init_notification_db,
-    get_user_ids_with_watchlist,
+    get_user_ids_needing_checks,
     get_preferences,
     get_user_bot_tokens,
+    get_all_active_alerts_grouped_by_ticker,
     prune_old_notifications,
     prune_check_runs,
 )
+from src.data.ticker_fetcher import TickerDataFetcher
 from src.notifications.checker import (
     check_all_tickers_for_user,
     deliver_notifications,
 )
+from src.notifications.custom_alerts import evaluate_custom_alerts
 from src.notifications.telegram_bot import poll_user_bot
 
 logger = logging.getLogger(__name__)
@@ -45,7 +51,7 @@ def check_tick() -> None:
     which spreads users across the hour so they don't all fire at the
     same minute.
     """
-    user_ids = get_user_ids_with_watchlist()
+    user_ids = get_user_ids_needing_checks()
     if not user_ids:
         return
 
@@ -82,6 +88,83 @@ def check_tick() -> None:
                 _last_check[user_id] = now
         except Exception:
             logger.exception("check_tick failed for user %d", user_id)
+
+
+_fetcher = TickerDataFetcher(max_workers=5)
+
+
+def reconciliation_tick() -> None:
+    """Fast reconciliation loop for custom alert rules.
+
+    Runs every 60 seconds — no stagger, no user-level gating. Queries
+    ALL active custom alert rules grouped by ticker, fetches market
+    data once per ticker (shared across users), evaluates conditions,
+    and delivers notifications immediately when triggered.
+
+    Only price/technical signals fire here (they work with lightweight
+    market data). Fundamental signals (health, F-score, P/E, etc.) are
+    handled by ``check_tick()`` when the user's stagger window hits.
+    """
+    rules_by_ticker = get_all_active_alerts_grouped_by_ticker()
+    if not rules_by_ticker:
+        return
+
+    tickers = set(rules_by_ticker.keys())
+    if not tickers:
+        return
+
+    logger.info(
+        "Reconciliation tick: %d tickers, %d total rule-instances",
+        len(tickers),
+        sum(len(r) for r in rules_by_ticker.values()),
+    )
+
+    # Fetch market data (price + OHLCV) for all tickers in parallel
+    fetched = _fetcher.fetch_many(tickers)
+
+    for ticker, ticker_rules in rules_by_ticker.items():
+        ticker_data = fetched.get(ticker)
+        if not ticker_data:
+            continue
+
+        # Build minimal data dict for price/technical signals
+        data = {"market": ticker_data.get("market", {})}
+        history = ticker_data.get("history", pd.DataFrame())
+        scores: Dict = {}  # fundamental signals return None → skipped
+
+        # Group rules by user_id so we can evaluate per user
+        by_user: Dict[int, List[Dict]] = {}
+        for rule in ticker_rules:
+            by_user.setdefault(rule["user_id"], []).append(rule)
+
+        for user_id, _ in by_user.items():
+            try:
+                notifications = evaluate_custom_alerts(
+                    user_id,
+                    ticker,
+                    data,
+                    scores,
+                    history_override=history,
+                )
+                if notifications:
+                    delivered = deliver_notifications(
+                        user_id, {ticker: notifications}
+                    )
+                    if delivered:
+                        logger.info(
+                            "Reconciliation: user %d, %s — %d delivered",
+                            user_id,
+                            ticker,
+                            delivered,
+                        )
+            except Exception:
+                logger.exception(
+                    "Reconciliation tick failed for user %d, %s",
+                    user_id,
+                    ticker,
+                )
+
+    _fetcher.clear_cycle()
 
 
 def poll_tick() -> None:
@@ -135,7 +218,7 @@ def _startup_check() -> None:
     cache_dir = os.path.expanduser("~/.cache/trade_proj/yf_cache")
     try:
         os.makedirs(cache_dir, exist_ok=True)
-        with tempfile.NamedTemporaryFile(dir=cache_dir) as f:
+        with tempfile.NamedTemporaryFile(dir=cache_dir):
             pass
     except PermissionError:
         logger.error("Cache directory %s is not writable. "
@@ -156,11 +239,12 @@ def main() -> None:
 
     Configures root logging to stream to stdout so systemd captures
     log output in the journal. Initializes both the auth and notification
-    databases, then enters an infinite loop with three ticks:
+    databases, then enters an infinite loop with four ticks:
 
-    - check_tick  (every 60 s):  scheduled watchlist checks
-    - poll_tick   (every  5 s):  Telegram bot polling
-    - maintenance (daily):       DB pruning
+    - reconciliation_tick  (every 60 s): custom alerts, all users, no stagger
+    - check_tick           (every 60 s): scheduled watchlist checks (stagger)
+    - poll_tick            (every  5 s): Telegram bot polling
+    - maintenance          (daily):      DB pruning
     """
     logging.basicConfig(
         level=logging.INFO,
@@ -178,15 +262,23 @@ def main() -> None:
     _startup_check()
 
     last_check_tick = 0.0
+    last_reconciliation_tick = 0.0
     last_poll_tick = 0.0
     last_maintenance_tick = time.time()
 
-    logger.info("Entering main loop (check=60s, poll=5s, maintenance=24h)")
+    logger.info(
+        "Entering main loop (reconciliation=60s, check=60s, poll=5s, maintenance=24h)"
+    )
 
     while True:
         now = time.time()
 
-        # Check tick — every 60 seconds
+        # Reconciliation tick — every 60 seconds (no stagger)
+        if now - last_reconciliation_tick >= 60:
+            reconciliation_tick()
+            last_reconciliation_tick = now
+
+        # Check tick — every 60 seconds (stagger-gated)
         if now - last_check_tick >= 60:
             check_tick()
             last_check_tick = now

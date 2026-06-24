@@ -162,12 +162,17 @@ def deliver_notifications(user_id: int, notifications_by_ticker: Dict[str, List[
                 if not rule_id:
                     continue
                 rule = get_custom_alert_rule_by_id(rule_id)
-                if rule and getattr(rule, "fire_push", 1):
+                if rule and rule.get("fire_push", 1):
                     results = send_push_notifications(
                         subscriptions=user_push_subs,
                         title=f"{n.get('ticker', '?')}: {n.get('title', 'Alert')}",
                         body=n.get("body", ""),
-                        data={"ticker": n.get("ticker"), "rule_id": n.get("id"), "url": f"/company/{n.get('ticker', '')}"},
+                        data={
+                            "ticker": n.get("ticker"),
+                            "rule_id": rule_id,
+                            "notification_id": n.get("id"),
+                            "url": f"/company/{n.get('ticker', '')}",
+                        },
                     )
                     for r in results:
                         if r["status"] == "sent":
@@ -183,17 +188,24 @@ def deliver_notifications(user_id: int, notifications_by_ticker: Dict[str, List[
 
     for _ticker, notifications in notifications_by_ticker.items():
         for n in notifications:
-            if telegram_enabled:
-                try:
-                    text = format_telegram_notification(n)
-                    sent = send_telegram_message(
-                        bot_token, prefs["telegram_chat_id"], text
-                    )
-                    if sent:
-                        mark_delivered(n["id"], "telegram")
-                        delivered += 1
-                except Exception as e:
-                    logger.warning(f"Telegram delivery failed for notification {n.get('id')}: {e}")
+            if not telegram_enabled:
+                continue
+            # Per-rule Telegram gate: if the rule has fire_telegram=0, skip
+            rule_id = n.get("rule_id")
+            if rule_id:
+                rule = get_custom_alert_rule_by_id(rule_id)
+                if rule and not rule.get("fire_telegram", 1):
+                    continue
+            try:
+                text = format_telegram_notification(n)
+                sent = send_telegram_message(
+                    bot_token, prefs["telegram_chat_id"], text
+                )
+                if sent:
+                    mark_delivered(n["id"], "telegram")
+                    delivered += 1
+            except Exception as e:
+                logger.warning(f"Telegram delivery failed for notification {n.get('id')}: {e}")
 
     return delivered
 
