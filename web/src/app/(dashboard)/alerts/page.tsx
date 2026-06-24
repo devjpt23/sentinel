@@ -414,20 +414,11 @@ class AlertsErrorBoundary extends Component<
 
 export default function AlertsPage() {
   const { data: userData, isLoading: userLoading } = useUser();
+  const userId = userData?.id ?? 0;
   const { loadRule } = useAlertBuilder();
   const [editingRule, setEditingRule] = useState<AlertRule | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const queryClient = useQueryClient();
-
-  if (userLoading) {
-    return <div className="flex items-center justify-center min-h-[60vh]"><Skeleton className="h-8 w-48" /></div>;
-  }
-
-  if (!userData) {
-    return <AuthRequired />;
-  }
-
-  const userId = userData.id;
 
   const { data: existingAlertsData } = useQuery({
     queryKey: ["alerts", userId],
@@ -436,6 +427,14 @@ export default function AlertsPage() {
     staleTime: 60_000,
   });
   const existingRuleNames = ((existingAlertsData?.rules ?? []) as AlertRule[]).map((r) => r.name);
+
+  if (userLoading) {
+    return <div className="flex items-center justify-center min-h-[60vh]"><Skeleton className="h-8 w-48" /></div>;
+  }
+
+  if (!userData) {
+    return <AuthRequired />;
+  }
 
   const handleEdit = (rule: AlertRule) => {
     setEditingRule(rule);
