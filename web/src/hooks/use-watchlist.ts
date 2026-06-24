@@ -34,10 +34,18 @@ export function useEnrichedWatchlist(userId: number) {
     queryKey: ["watchlist-enriched", userId],
     queryFn: async () => {
       const data = await api.getEnrichedWatchlist(userId);
-      return data.items ?? [];
+      return (data.items ?? []).map(cleanItem);
     },
     refetchInterval: 60_000, // slower, more expensive endpoint
   });
+}
+
+// Strip CSS selector prefixes leaked into ticker data (e.g. "@E32 AAPL")
+function cleanItem(item: EnrichedWatchlistItem): EnrichedWatchlistItem {
+  if (item.ticker && item.ticker.includes("@")) {
+    item.ticker = item.ticker.split(" ").filter((p) => !p.startsWith("@")).join(" ").trim();
+  }
+  return item;
 }
 
 export function useAddToWatchlist(userId: number) {

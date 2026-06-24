@@ -30,10 +30,12 @@ export function formatNumber(value: number | null | undefined): string {
 }
 
 export function formatRelativeTime(dateStr: string): string {
-  if (!dateStr) return "Unknown";
+  if (!dateStr) return "Never";
+  // Handle SQLite format: "YYYY-MM-DD HH:MM:SS" → ISO 8601
+  const normalized = dateStr.replace(" ", "T");
   const now = new Date();
-  const date = new Date(dateStr);
-  if (isNaN(date.getTime())) return "Unknown";
+  const date = new Date(normalized);
+  if (isNaN(date.getTime())) return "Invalid date";
   const diffMs = now.getTime() - date.getTime();
   const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));

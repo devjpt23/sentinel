@@ -133,7 +133,14 @@ function NavItem({ item, active, onClick }: { item: (typeof dashboardItems)[0]; 
   return (
     <Link
       href={item.href}
-      onClick={onClick}
+      prefetch={false}
+      replace
+      onClick={(e) => {
+        onClick?.();
+        // Use direct navigation to avoid client-side router hangs
+        e.preventDefault();
+        window.location.href = item.href;
+      }}
       className={cn(
         "flex items-center gap-3 mx-2 px-3 py-2 rounded-lg text-sm transition-all duration-150",
         active

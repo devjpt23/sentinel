@@ -1197,7 +1197,14 @@ def api_sectors_search():
     industry = request.args.get("industry", "")
     try:
         results = get_companies_matching(q, sector=sector, industry=industry)
-        # Enrich first 50 results with price data
+        # Default numeric fields (set to None so frontend shows N/A when missing)
+        for r in results[:50]:
+            r.setdefault("price", None)
+            r.setdefault("marketCap", None)
+            r.setdefault("pe", None)
+            r.setdefault("change", None)
+            r.setdefault("healthScore", None)
+        # Enrich first 50 results with price data from yfinance
         import yfinance as yf  # type: ignore
         for r in results[:50]:
             try:

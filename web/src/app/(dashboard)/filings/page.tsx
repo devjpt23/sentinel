@@ -1,5 +1,10 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import { useEffect } from "react";
 
 export default function FilingsRedirect() {
-  redirect("/sec-filings");
+  useEffect(() => {
+    window.location.replace("/sec-filings");
+  }, []);
+  return null;
 }

@@ -15,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
 
-interface SectorResult { ticker: string; name: string; sector: string; industry: string; price: number; marketCap: number; pe: number | null; change: number; healthScore: number; }
+interface SectorResult { ticker: string; name: string; sector: string; industry: string; price: number | null; marketCap: number | null; pe: number | null; change: number | null; healthScore: number | null; }
 
 function cell(info: { getValue: () => unknown }): string { return info.getValue() as string; }
 function cellNum(info: { getValue: () => unknown }): number { return info.getValue() as number; }
@@ -65,23 +65,23 @@ export default function SectorsPage() {
     {
       accessorKey: "price",
       header: (h) => (<button onClick={() => (h.column as Column<SectorResult>).toggleSorting()} className="flex items-center gap-1">Price <ArrowUpDown className="h-3 w-3" /></button>),
-      cell: (info) => formatCurrency(cellNum(info)),
+      cell: (info) => { const v = info.getValue() as number | null; return v !== null && v !== undefined ? formatCurrency(v) : <span className="text-[#6b7f8e]">N/A</span>; },
     },
     {
       accessorKey: "marketCap",
       header: (h) => (<button onClick={() => (h.column as Column<SectorResult>).toggleSorting()} className="flex items-center gap-1">Mkt Cap <ArrowUpDown className="h-3 w-3" /></button>),
-      cell: (info) => formatCurrency(cellNum(info)),
+      cell: (info) => { const v = info.getValue() as number | null; return v !== null && v !== undefined ? formatCurrency(v) : <span className="text-[#6b7f8e]">N/A</span>; },
     },
     { accessorKey: "pe", header: "P/E", cell: (info) => { const v = cellNum(info); return v != null ? v.toFixed(2) : "N/A"; } },
     {
       accessorKey: "change",
       header: (h) => (<button onClick={() => (h.column as Column<SectorResult>).toggleSorting()} className="flex items-center gap-1">Change <ArrowUpDown className="h-3 w-3" /></button>),
-      cell: (info) => { const v = cellNum(info); const c = v >= 0 ? "text-[#84cc16]" : "text-red-400"; const Ic = v >= 0 ? ArrowUp : ArrowDown; return (<span className={"flex items-center gap-1 " + c}><Ic className="h-3 w-3" />{formatPct(v)}</span>); },
+      cell: (info) => { const v = info.getValue() as number | null; if (v === null || v === undefined) return <span className="text-[#6b7f8e]">N/A</span>; const c = v >= 0 ? "text-[#84cc16]" : "text-red-400"; const Ic = v >= 0 ? ArrowUp : ArrowDown; return (<span className={"flex items-center gap-1 " + c}><Ic className="h-3 w-3" />{formatPct(v)}</span>); },
     },
     {
       accessorKey: "healthScore",
       header: (h) => (<button onClick={() => (h.column as Column<SectorResult>).toggleSorting()} className="flex items-center gap-1">Health <ArrowUpDown className="h-3 w-3" /></button>),
-      cell: (info) => <Badge className={getHealthBg(cellNum(info))}>{cellNum(info)}</Badge>,
+      cell: (info) => { const v = info.getValue() as number | null; return v !== null && v !== undefined ? <Badge className={getHealthBg(v)}>{v}</Badge> : <span className="text-[#6b7f8e]">N/A</span>; },
     },
     { id: "actions", header: "", cell: ({ row }) => (<Link href={"/company/" + row.original.ticker}><Button size="sm" variant="outline" className="text-xs">Analyze</Button></Link>) },
   ], []);

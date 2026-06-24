@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { Component, useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Plus, Trash2, ToggleLeft, ToggleRight, AlertTriangle, Info,
@@ -145,12 +145,17 @@ function DeliveryChannels({ userId }: { userId: number }) {
 function RulesList({ userId }: { userId: number }) {
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["alerts", userId],
     queryFn: () => api.get<{ rules: AlertRule[] }>(`/api/alerts/${userId}`),
+    retry: 2,
   });
 
   const rules = (data?.rules ?? []) as AlertRule[];
+
+  if (isError) {
+    return <AlertsPageFallback />;
+  }
 
   const toggleMutation = useMutation({
     mutationFn: (ruleId: string) =>
@@ -579,6 +584,23 @@ function AlertsPageFallback() {
   );
 }
 
+class AlertsErrorBoundary extends Component<
+  { children: React.ReactNode; fallback: React.ReactNode },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; fallback: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  render() {
+    if (this.state.hasError) return this.props.fallback;
+    return this.props.children;
+  }
+}
+
 export default function AlertsPage() {
   const { data: userData, isLoading: userLoading } = useUser();
   const [showBuilder, setShowBuilder] = useState(false);
@@ -612,6 +634,7 @@ export default function AlertsPage() {
   };
 
   return (
+    <AlertsErrorBoundary fallback={<AlertsPageFallback />}>
     <div className="space-y-6 max-w-4xl">
       <div>
         <h2 className="text-2xl font-bold text-[#f0f4f0]">Notification Settings</h2>
@@ -665,5 +688,6 @@ export default function AlertsPage() {
       {/* Notification Preferences */}
       <PreferencesSection userId={userId} />
     </div>
+    </AlertsErrorBoundary>
   );
 }

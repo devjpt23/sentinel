@@ -20,8 +20,14 @@ const breadcrumbMap: Record<string, { label: string; parent?: { label: string; h
 
 function resolveBreadcrumb(pathname: string): { label: string; parent?: { label: string; href: string } } {
   if (breadcrumbMap[pathname]) return breadcrumbMap[pathname];
+
+  // Dynamic route patterns
   const companyMatch = pathname.match(/^\/company\/([^/]+)/);
   if (companyMatch) return { label: companyMatch[1].toUpperCase(), parent: { label: "Dashboards", href: "/" } };
+
+  const supplyChainMatch = pathname.match(/^\/supply-chain\/([^/]+)/);
+  if (supplyChainMatch) return { label: `${supplyChainMatch[1].toUpperCase()} Supply Chain`, parent: { label: "Dashboards", href: "/" } };
+
   return { label: "Page" };
 }
 
