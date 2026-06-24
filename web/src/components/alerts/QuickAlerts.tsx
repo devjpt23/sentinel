@@ -9,6 +9,8 @@ import {
   ArrowUpRight,
   AlertTriangle,
   AlertCircle,
+  CheckCircle2,
+  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AlertCondition } from "@/types/api";
@@ -197,9 +199,11 @@ const ICON_COLORS: Record<
 
 interface QuickAlertsProps {
   onAdd: (template: AlertTemplate) => void;
+  existingRuleNames?: string[];
 }
 
-export default function QuickAlerts({ onAdd }: QuickAlertsProps) {
+export default function QuickAlerts({ onAdd, existingRuleNames = [] }: QuickAlertsProps) {
+  const existingNames = new Set(existingRuleNames);
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
       {TEMPLATES.map((template) => {
@@ -230,14 +234,29 @@ export default function QuickAlerts({ onAdd }: QuickAlertsProps) {
             <p className="text-xs text-[#6b7f8e] mb-4">
               {template.description}
             </p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-[#84cc16] w-full"
-              onClick={() => onAdd(template)}
-            >
-              Add Alert
-            </Button>
+            {existingNames.has(template.name) ? (
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-[#3a5570] w-full cursor-default"
+                  disabled
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                  Already Added
+                </Button>
+              </div>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-[#84cc16] w-full"
+                onClick={() => onAdd(template)}
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" />
+                Add Alert
+              </Button>
+            )}
           </div>
         );
       })}

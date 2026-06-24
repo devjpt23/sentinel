@@ -3,7 +3,7 @@
 import { Component, useState, useMemo, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Plus, Trash2, ToggleLeft, ToggleRight, AlertTriangle, Info,
+  Plus, Trash2, ToggleLeft, ToggleRight, Pencil, AlertTriangle, Info,
   AlertCircle, ChevronDown, ChevronRight, Lock, Globe, Bot, Bell,
   CheckCircle2, XCircle, Loader2, Send, Settings,
 } from "lucide-react";
@@ -14,6 +14,7 @@ import { useUser, usePreferences, useUpdatePreferences } from "@/hooks/use-watch
 import { getPushStatus } from "@/lib/push-notifications";
 import { SIGNAL_CATALOG, SIGNAL_CATEGORIES, SIGNAL_CATALOG_BY_CATEGORY, getSignalById } from "@/lib/signal-catalog";
 import QuickAlerts from "@/components/alerts/QuickAlerts";
+import AlertRuleDialog from "@/components/alerts/AlertRuleDialog";
 import type { AlertTemplate } from "@/components/alerts/QuickAlerts";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
@@ -26,8 +27,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter }
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
-
-const OPERATORS = [">", "<", ">=", "<=", "==", "crosses_above", "crosses_below", "touches_upper", "touches_lower"];
 
 function severityIcon(severity: string) {
   switch (severity) {
@@ -142,8 +141,9 @@ function DeliveryChannels({ userId }: { userId: number }) {
   );
 }
 
-function RulesList({ userId }: { userId: number }) {
+function RulesList({ userId, onEdit }: { userId: number; onEdit: (rule: AlertRule) => void }) {
   const queryClient = useQueryClient();
+  const { loadRule } = useAlertBuilder();
 
   const { data, isLoading, isError } = useQuery({
     queryKey: ["alerts", userId],
@@ -213,6 +213,12 @@ function RulesList({ userId }: { userId: number }) {
                 <Badge variant="outline" className={severityBadgeClass(rule.severity)}>{rule.severity}</Badge>
               </div>
               <div className="flex items-center gap-2">
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-[#6b7f8e] hover:text-[#84cc16]" onClick={() => {
+                  loadRule(rule);
+                  onEdit(rule);
+                }}>
+                  <Pencil className="h-4 w-4" />
+                </Button>
                 <button onClick={() => toggleMutation.mutate(rule.id)} className="text-[#6b7f8e] hover:text-[#f0f4f0] transition-colors">
                   {rule.enabled ? <ToggleRight className="h-5 w-5 text-[#84cc16]" /> : <ToggleLeft className="h-5 w-5 text-[#3a5570]" />}
                 </button>
@@ -238,207 +244,6 @@ function RulesList({ userId }: { userId: number }) {
           </CardContent>
         </Card>
       ))}
-    </div>
-  );
-}
-
-function CustomRuleBuilder({ userId, onCreated }: { userId: number; onCreated: () => void }) {
-  const queryClient = useQueryClient();
-  const {
-    name, severity, scope, ticker, conditions, logic,
-    setName, setSeverity, setScope, setTicker,
-    addCondition, updateCondition, removeCondition, setLogic, reset,
-  } = useAlertBuilder();
-
-  const createMutation = useMutation({
-    mutationFn: () => {
-      const finalName = name.trim() || autoGenerateName();
-      const body = {
-        name: finalName,
-        severity,
-        scope,
-        ...(scope === "single" ? { ticker } : {}),
-        conditions: conditions.filter((c) => c.signal_id),
-        logic,
-      };
-      return api.post<{ ok: boolean; rule_id?: string }>(`/api/alerts/${userId}`, body);
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["alerts"] });
-      reset();
-      onCreated();
-      toast.success("Alert rule created");
-    },
-  });
-
-  function autoGenerateName() {
-    const parts = conditions.filter((c) => c.signal_id).map((c) => {
-      const sig = getSignalById(c.signal_id);
-      return sig ? `${sig.name} ${c.operator} ${c.value}` : `${c.signal_id} ${c.operator} ${c.value}`;
-    });
-    if (parts.length === 0) return "Untitled Rule";
-    if (parts.length === 1) return parts[0];
-    return parts.join(` ${logic} `);
-  }
-
-  return (
-    <div className="space-y-5">
-      {/* Rule Name */}
-      <div>
-        <Label>Rule Name</Label>
-        <Input
-          placeholder={autoGenerateName()}
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <p className="text-xs text-[#3a5570] mt-1">Leave blank to auto-generate from conditions</p>
-      </div>
-
-      {/* Severity + Scope row */}
-      <div className="grid grid-cols-2 gap-4">
-        <div>
-          <Label>Severity</Label>
-          <div className="flex gap-2 mt-1">
-            {(["info", "warning", "critical"] as const).map((s) => (
-              <Button
-                key={s}
-                variant={severity === s ? "default" : "outline"}
-                size="sm"
-                onClick={() => setSeverity(s)}
-                className={severity === s ? "" : "text-[#6b7f8e]"}
-              >
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </Button>
-            ))}
-          </div>
-        </div>
-        <div>
-          <Label>Scope</Label>
-          <div className="flex gap-2 mt-1">
-            <Button variant={scope === "watchlist" ? "default" : "outline"} size="sm" onClick={() => setScope("watchlist")}>Watchlist</Button>
-            <Button variant={scope === "single" ? "default" : "outline"} size="sm" onClick={() => setScope("single")}>Single Ticker</Button>
-          </div>
-        </div>
-      </div>
-
-      {scope === "single" && (
-        <div>
-          <Label>Ticker</Label>
-          <Input placeholder="e.g. AAPL" value={ticker} onChange={(e) => setTicker(e.target.value.toUpperCase())} />
-        </div>
-      )}
-
-      {/* Conditions */}
-      <div>
-        <Label className="mb-3 block">When...</Label>
-        {conditions.map((cond, idx) => {
-          const categorySignals = SIGNAL_CATALOG_BY_CATEGORY[cond.signal_category] ?? [];
-          const selectedSignal = cond.signal_id ? getSignalById(cond.signal_id) : null;
-
-          return (
-            <div key={idx} className="space-y-3 mb-4 rounded-lg border border-[#1e2d3a] p-4">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-[#6b7f8e]">Condition {idx + 1}</span>
-                {conditions.length > 1 && (
-                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 text-[#6b7f8e]" onClick={() => removeCondition(idx)}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs text-[#6b7f8e]">Category</Label>
-                  <Select value={cond.signal_category} onValueChange={(v) => updateCondition(idx, "signal_category", v)}>
-                    <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      {SIGNAL_CATEGORIES.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs text-[#6b7f8e]">Signal</Label>
-                  <Select value={cond.signal_id} onValueChange={(v) => updateCondition(idx, "signal_id", v)}>
-                    <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      {categorySignals.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          <span>{s.name}</span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {selectedSignal && (
-                    <p className="text-xs text-[#3a5570] mt-1">{selectedSignal.description}</p>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs text-[#6b7f8e]">Operator</Label>
-                  <Select value={cond.operator} onValueChange={(v) => updateCondition(idx, "operator", v)}>
-                    <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                    <SelectContent>
-                      {selectedSignal
-                        ? selectedSignal.operators.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)
-                        : OPERATORS.map((o) => <SelectItem key={o} value={o}>{o}</SelectItem>)
-                      }
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs text-[#6b7f8e]">Value</Label>
-                  <Input type="number" value={cond.value || ""} onChange={(e) => updateCondition(idx, "value", parseFloat(e.target.value) || 0)} />
-                </div>
-              </div>
-
-              {selectedSignal?.requires_days && (
-                <div>
-                  <Label className="text-xs text-[#6b7f8e]">Days Lookback</Label>
-                  <Input type="number" value={cond.days || ""} onChange={(e) => updateCondition(idx, "days", parseInt(e.target.value) || 0)} />
-                </div>
-              )}
-
-              {selectedSignal?.requires_period && (
-                <div>
-                  <Label className="text-xs text-[#6b7f8e]">Period</Label>
-                  <Select value={cond.period || ""} onValueChange={(v) => updateCondition(idx, "period", v)}>
-                    <SelectTrigger><SelectValue placeholder="Select period" /></SelectTrigger>
-                    <SelectContent>
-                      {["1D", "1W", "1M", "3M", "6M", "1Y"].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-          );
-        })}
-
-        {conditions.length < 3 && (
-          <Button variant="outline" size="sm" onClick={addCondition}>
-            <Plus className="h-4 w-4 mr-1" /> Add Condition
-          </Button>
-        )}
-      </div>
-
-      {/* Logic operator between conditions */}
-      {conditions.length > 1 && (
-        <div>
-          <Label>Condition Logic</Label>
-          <div className="flex gap-2 mt-1">
-            <Button variant={logic === "AND" ? "default" : "outline"} size="sm" onClick={() => setLogic("AND")}>AND (all must match)</Button>
-            <Button variant={logic === "OR" ? "default" : "outline"} size="sm" onClick={() => setLogic("OR")}>OR (any can match)</Button>
-          </div>
-        </div>
-      )}
-
-      <Separator />
-
-      <Button variant="primary" onClick={() => createMutation.mutate()} disabled={createMutation.isPending || !conditions[0]?.signal_id}>
-        {createMutation.isPending ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Plus className="h-4 w-4 mr-1" />}
-        Save Rule
-      </Button>
     </div>
   );
 }
@@ -609,7 +414,9 @@ class AlertsErrorBoundary extends Component<
 
 export default function AlertsPage() {
   const { data: userData, isLoading: userLoading } = useUser();
-  const [showBuilder, setShowBuilder] = useState(false);
+  const { loadRule } = useAlertBuilder();
+  const [editingRule, setEditingRule] = useState<AlertRule | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
   const queryClient = useQueryClient();
 
   if (userLoading) {
@@ -622,21 +429,30 @@ export default function AlertsPage() {
 
   const userId = userData.id;
 
+  const { data: existingAlertsData } = useQuery({
+    queryKey: ["alerts", userId],
+    queryFn: () => api.get<{ rules: AlertRule[] }>(`/api/alerts/${userId}`),
+    enabled: !!userId,
+    staleTime: 60_000,
+  });
+  const existingRuleNames = ((existingAlertsData?.rules ?? []) as AlertRule[]).map((r) => r.name);
+
+  const handleEdit = (rule: AlertRule) => {
+    setEditingRule(rule);
+    setDialogOpen(true);
+  };
+
   const handleQuickAdd = (template: AlertTemplate) => {
-    const body = {
+    loadRule({
       name: template.name,
       severity: template.severity,
       scope: template.scope,
-      ...(template.ticker ? { ticker: template.ticker } : {}),
+      ticker: template.ticker ?? "",
       conditions: template.conditions,
       logic: template.logic,
-    };
-    api.post<{ ok: boolean }>(`/api/alerts/${userId}`, body).then(() => {
-      queryClient.invalidateQueries({ queryKey: ["alerts"] });
-      toast.success(`"${template.name}" alert created`);
-    }).catch(() => {
-      toast.error("Failed to create alert");
     });
+    setEditingRule(null);
+    setDialogOpen(true);
   };
 
   return (
@@ -659,7 +475,7 @@ export default function AlertsPage() {
       <div>
         <h3 className="text-sm font-semibold text-[#c8d8e4] mb-3">Quick Alerts</h3>
         <p className="text-xs text-[#6b7f8e] mb-4">One-click presets for common trading alerts</p>
-        <QuickAlerts onAdd={handleQuickAdd} />
+        <QuickAlerts onAdd={handleQuickAdd} existingRuleNames={existingRuleNames} />
       </div>
 
       <Separator />
@@ -668,26 +484,22 @@ export default function AlertsPage() {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-semibold text-[#c8d8e4]">Your Alert Rules</h3>
-          <Button variant="outline" size="sm" onClick={() => setShowBuilder(!showBuilder)}>
+          <Button variant="outline" size="sm" onClick={() => { setEditingRule(null); setDialogOpen(true); }}>
             <Plus className="h-4 w-4 mr-1" />
-            {showBuilder ? "Close" : "Create Custom Rule"}
+            Create Custom Rule
           </Button>
         </div>
-        <RulesList userId={userId} />
+        <RulesList userId={userId} onEdit={handleEdit} />
       </div>
 
-      {/* Custom Rule Builder */}
-      {showBuilder && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm">Custom Rule Builder</CardTitle>
-            <CardDescription>Create a custom alert rule with your own conditions</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <CustomRuleBuilder userId={userId} onCreated={() => setShowBuilder(false)} />
-          </CardContent>
-        </Card>
-      )}
+      <AlertRuleDialog
+        userId={userId}
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        editingRule={editingRule}
+        onCreated={() => queryClient.invalidateQueries({ queryKey: ["alerts"] })}
+        existingRuleNames={existingRuleNames}
+      />
 
       <Separator />
 

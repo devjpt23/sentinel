@@ -10,6 +10,7 @@ Poller: polls getUpdates per user, captures chat_id from any message,
          and links it to their Sentinel account.
 """
 
+import json
 import time
 import logging
 from typing import Optional, Dict
@@ -86,7 +87,11 @@ def send_telegram_message(
 # ─── Notification Formatting ─────────────────────────────────
 
 def format_telegram_notification(notification: Dict) -> str:
-    """Format a notification dict into a clean HTML Telegram message."""
+    """Format a notification dict into a clean HTML Telegram message.
+
+    Includes notification type context, current values for custom alerts,
+    and a 'View in Dashboard' link.
+    """
     severity_emoji = {"info": "ℹ️", "warning": "⚠️", "critical": "🚨"}
     type_emoji = {
         "health_change": "💊",
@@ -95,17 +100,28 @@ def format_telegram_notification(notification: Dict) -> str:
         "zscore_zone_change": "📐",
         "fscore_change": "📋",
     }
+    type_labels = {
+        "health_change": "💊 Health Score Change",
+        "verdict_change": "📊 Valuation Change",
+        "risk_flag_change": "🔴 Risk Flag Change",
+        "zscore_zone_change": "📐 Z-Score Zone Change",
+        "fscore_change": "📋 F-Score Change",
+        "custom_alert": "⚡ Custom Alert",
+    }
+
     direction = ""
-    if notification.get("old_value") and notification.get("new_value"):
-        try:
-            old_v = float(str(notification["old_value"]))
-            new_v = float(str(notification["new_value"]))
-            direction = " 📈" if new_v > old_v else " 📉"
-        except (ValueError, TypeError):
-            pass
+    if notification.get("type") != "custom_alert":
+        if notification.get("old_value") and notification.get("new_value"):
+            try:
+                old_v = float(str(notification["old_value"]))
+                new_v = float(str(notification["new_value"]))
+                direction = " 📈" if new_v > old_v else " 📉"
+            except (ValueError, TypeError):
+                pass
 
     emoji = severity_emoji.get(notification.get("severity", "info"), "ℹ️")
     type_icon = type_emoji.get(notification.get("type", ""), "")
+    ntype = notification.get("type", "")
 
     lines = [
         f"{emoji} {type_icon} <b>{notification.get('ticker', '???')}</b> — {notification.get('title', '')}{direction}",
@@ -114,10 +130,30 @@ def format_telegram_notification(notification: Dict) -> str:
     if notification.get("body"):
         lines.append(f"<i>{notification['body']}</i>")
 
-    if notification.get("old_value") and notification.get("new_value"):
-        lines.append(
-            f"Change: <b>{notification['old_value']}</b> → <b>{notification['new_value']}</b>"
-        )
+    # Notification type context
+    type_label = type_labels.get(ntype, ntype.replace("_", " ").title())
+    lines.append(f"Type: {type_label}")
+
+    # For custom alerts, show current values from the value_map
+    if ntype == "custom_alert" and notification.get("new_value"):
+        try:
+            value_map = json.loads(notification["new_value"])
+            if value_map:
+                values_str = ", ".join(
+                    f"{sid.replace('_', ' ').title()}: {v}"
+                    for sid, v in value_map.items()
+                )
+                lines.append(f"📊 {values_str}")
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Dashboard link
+    ticker = notification.get("ticker", "")
+    if ticker:
+        link = f"https://sentinel.app/company/{ticker}"
+        if notification.get("rule_id"):
+            link += f"?alert={notification['rule_id']}"
+        lines.append(f"🔗 <a href='{link}'>View in Dashboard</a>")
 
     return "\n".join(lines)
 

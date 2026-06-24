@@ -2,7 +2,102 @@
 
 from unittest.mock import patch
 
-from src.notifications.checker import deliver_notifications
+from src.notifications.checker import deliver_notifications, format_push_notification
+
+
+# ─── format_push_notification ─────────────────────────────────────
+
+class TestFormatPushNotification:
+    """format_push_notification() must clean up body text and extract data payload."""
+
+    def test_strips_ticker_prefix(self):
+        """Custom alert body prefixed with 'TICKER:' must strip the prefix."""
+        title, body, extra = format_push_notification({
+            "ticker": "AAPL",
+            "title": "Price Alert",
+            "body": "AAPL: Price dropped 7.2%",
+        })
+        assert "AAPL:" not in body
+        assert body.startswith("Price dropped")
+
+    def test_no_ticker_prefix_left_untouched(self):
+        """Body without ticker prefix should pass through."""
+        title, body, extra = format_push_notification({
+            "ticker": "AAPL",
+            "title": "Health Score Decline",
+            "body": "Score dropped from 80 to 60",
+        })
+        assert body == "Score dropped from 80 to 60"
+
+    def test_appends_price_context_for_custom_alerts(self):
+        """Custom alerts get | Price: $XXX appended."""
+        title, body, extra = format_push_notification({
+            "type": "custom_alert",
+            "ticker": "NVDA",
+            "title": "RSI Alert",
+            "body": "RSI at 24.3",
+            "current_price": 173.40,
+        })
+        assert "Price: $173.40" in body
+
+    def test_skips_price_context_for_system_alerts(self):
+        """System alerts (not custom_alert type) don't get price context."""
+        title, body, extra = format_push_notification({
+            "type": "health_change",
+            "ticker": "AAPL",
+            "title": "Health Change",
+            "body": "Score dropped",
+            "current_price": 150.0,
+        })
+        assert "Price:" not in body
+
+    def test_truncates_long_body(self):
+        """Body over 120 chars must be truncated with ..."""
+        long_body = "x" * 200
+        title, body, extra = format_push_notification({
+            "title": "Long Alert",
+            "body": long_body,
+            "ticker": "AAPL",
+        })
+        assert len(body) <= 120
+        assert body.endswith("...")
+
+    def test_short_body_not_truncated(self):
+        """Body under 120 chars stays intact."""
+        short_body = "Price dropped 5%"
+        title, body, extra = format_push_notification({
+            "title": "Short Alert",
+            "body": short_body,
+            "ticker": "AAPL",
+        })
+        assert body == short_body
+
+    def test_empty_body_returns_empty(self):
+        """Notification with no body returns empty string."""
+        title, body, extra = format_push_notification({
+            "ticker": "AAPL",
+            "title": "Alert",
+        })
+        assert body == ""
+
+    def test_extra_data_contains_current_price(self):
+        """Extra data dict includes current_price when available."""
+        title, body, extra = format_push_notification({
+            "ticker": "AAPL",
+            "title": "Alert",
+            "body": "Something happened",
+            "current_price": 175.5,
+        })
+        assert extra.get("current_price") == 175.5
+
+    def test_extra_data_empty_when_no_price(self):
+        """Extra data dict is empty when no current_price in notification."""
+        title, body, extra = format_push_notification({
+            "ticker": "AAPL",
+            "title": "Alert",
+            "body": "Something happened",
+        })
+        assert extra == {}
 
 
 class TestDeliverNotifications:

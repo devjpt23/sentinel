@@ -638,6 +638,7 @@ def _evaluate_single_rule(
 
     results: List[bool] = []
     condition_descriptions: List[str] = []
+    condition_details: List[tuple] = []
 
     for cond in conditions:
         signal_id = cond.get("signal_id") or cond.get("signal", "")
@@ -690,6 +691,9 @@ def _evaluate_single_rule(
         condition_descriptions.append(
             _format_condition(signal_def, operator, threshold, current_value)
         )
+        condition_details.append(
+            (signal_id, operator, threshold, current_value, cond.get("params", {}), signal_def)
+        )
 
     # Save current values for ALL conditions (for next cycle's crosses detection)
     for cond in conditions:
@@ -715,11 +719,19 @@ def _evaluate_single_rule(
     if not triggered:
         return None
 
-    # Build notification
+    # Build notification body
     rule_name = rule.get("name", f"Rule #{rule['id']}")
     severity = rule.get("severity", "info")
-    connector = " AND " if logic_op == "AND" else " OR "
-    body = f"{ticker}: {connector.join(condition_descriptions)}"
+
+    if len(condition_details) == 1:
+        # Single condition: descriptive natural language
+        sid, op, thresh, cur_val, cond_params, sig_def = condition_details[0]
+        current_price = data.get("market", {}).get("price")
+        body = _format_natural_body(sid, op, thresh, cur_val, cond_params, current_price)
+    else:
+        # Multiple conditions: join descriptions naturally
+        connector = " and " if logic_op == "AND" else " or "
+        body = connector.join(condition_descriptions)
 
     # Collect current values for the notification payload
     value_map = {}
@@ -796,6 +808,128 @@ def _format_condition(
         cv_str = str(current_value)
 
     return f"{name} {op_display} {th_str} (now: {cv_str})"
+
+
+def _format_natural_body(
+    signal_id: str,
+    operator: str,
+    threshold: float,
+    current_value: float,
+    params: Dict,
+    current_price: Optional[float] = None,
+) -> str:
+    """Generate natural language body text for a single-condition custom alert.
+
+    Produces action-oriented text like:
+        "Price dropped 7.2% — below your 5% threshold. Currently at $173.40."
+        "RSI at 24.3 — below your 30 threshold (oversold territory)."
+        "MACD crossed above signal line — bullish signal."
+    """
+    signal_def = SIGNAL_CATALOG.get(signal_id, {})
+    name = signal_def.get("name", "?")
+    unit = signal_def.get("unit", "")
+
+    # --- Format threshold for display ---
+    if threshold is not None:
+        try:
+            threshold = float(threshold)
+        except (ValueError, TypeError):
+            pass
+
+    if isinstance(threshold, float):
+        if unit in ("USD", "$"):
+            th_str = f"${threshold:,.2f}"
+        elif unit == "%":
+            th_str = f"{threshold}%"
+        elif unit == "×":
+            th_str = f"{threshold}×"
+        elif unit == "pts":
+            th_str = f"{threshold} pts"
+        elif unit == "flags":
+            th_str = f"{int(threshold)} flags"
+        else:
+            th_str = f"{threshold:.2f}"
+    else:
+        th_str = str(threshold)
+
+    # --- Format current value for display ---
+    if isinstance(current_value, float):
+        if unit in ("USD", "$"):
+            cv_str = f"${current_value:,.2f}"
+        elif unit == "%":
+            cv_str = f"{current_value:+.1f}%"
+        elif unit == "×":
+            cv_str = f"{current_value:.1f}×"
+        elif unit == "pts":
+            cv_str = f"{current_value:.1f} pts"
+        else:
+            cv_str = f"{current_value:.2f}"
+    else:
+        cv_str = str(current_value)
+
+    # --- Signal-specific natural language ---
+    # Price & Volume
+    if signal_id == "price_change_pct":
+        if current_value < 0:
+            body = f"Price dropped {abs(current_value):.1f}% — below your {abs(threshold):.1f}% threshold."
+        else:
+            body = f"Price rose {current_value:.1f}% — above your {threshold:.1f}% threshold."
+        if current_price is not None:
+            body += f" Currently at ${current_price:.2f}."
+        return body
+
+    if signal_id == "price_change_abs":
+        direction = "dropped" if current_value < 0 else "rose"
+        body = f"Price {direction} ${abs(current_value):.2f} — past your ${abs(threshold):.2f} threshold."
+        if current_price is not None:
+            body += f" Currently at ${current_price:.2f}."
+        return body
+
+    if signal_id == "price":
+        below = operator in ("<", "<=")
+        body = f"Price at {cv_str} — {'below' if below else 'above'} your {th_str} threshold."
+        return body
+
+    if signal_id == "distance_52w_high":
+        body = f"Price is {current_value:.1f}% below 52-week high (threshold: {th_str})."
+        return body
+
+    if signal_id == "distance_52w_low":
+        body = f"Price is {current_value:.1f}% above 52-week low (threshold: {th_str})."
+        return body
+
+    if signal_id == "volume_spike":
+        return f"Volume is {cv_str} average — unusual activity detected."
+
+    # Technical
+    if signal_id == "rsi":
+        below = operator in ("<", "<=")
+        zone = "oversold" if below else "overbought"
+        return (
+            f"RSI at {current_value:.1f} — {'below' if below else 'above'} "
+            f"your {threshold:.0f} threshold ({zone} territory)."
+        )
+
+    if signal_id == "sma_crossover":
+        period = params.get("period", 50)
+        if operator == "crosses_above":
+            return f"Price crossed above {period}-day SMA — bullish signal."
+        else:
+            return f"Price crossed below {period}-day SMA — bearish signal."
+
+    if signal_id == "macd":
+        sig = operator == "crosses_above"
+        return f"MACD crossed {'above' if sig else 'below'} signal line — {'bullish' if sig else 'bearish'} signal."
+
+    if signal_id == "bollinger":
+        if operator == "touches_upper":
+            return "Price touched upper Bollinger Band — overextended."
+        else:
+            return "Price touched lower Bollinger Band — potential bounce zone."
+
+    # Fundamental / Generic fallback
+    below = operator in ("<", "<=")
+    return f"{name} is {cv_str} — {'below' if below else 'above'} your {th_str} threshold."
 
 
 def describe_condition_for_ui(cond: Dict) -> str:

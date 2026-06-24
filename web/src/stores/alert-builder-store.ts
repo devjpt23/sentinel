@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { AlertCondition } from "@/types/api";
+import type { AlertCondition, AlertRule } from "@/types/api";
 
 interface AlertBuilderState {
   name: string;
@@ -15,8 +15,10 @@ interface AlertBuilderState {
   addCondition: () => void;
   updateCondition: (index: number, field: keyof AlertCondition, value: string | number) => void;
   removeCondition: (index: number) => void;
+  moveCondition: (index: number, direction: "up" | "down") => void;
   setLogic: (logic: "AND" | "OR") => void;
   reset: () => void;
+  loadRule: (rule: Pick<AlertRule, "name" | "severity" | "scope" | "ticker" | "conditions" | "logic">) => void;
 }
 
 const defaultCondition = (): AlertCondition => ({
@@ -53,7 +55,26 @@ export const useAlertBuilder = create<AlertBuilderState>((set) => ({
     set((state) => ({
       conditions: state.conditions.filter((_, i) => i !== index),
     })),
+  moveCondition: (index, direction) =>
+    set((state) => {
+      const conditions = [...state.conditions];
+      const target = direction === "up" ? index - 1 : index + 1;
+      if (target < 0 || target >= conditions.length) return state;
+      [conditions[index], conditions[target]] = [conditions[target], conditions[index]];
+      return { conditions };
+    }),
   setLogic: (logic) => set({ logic }),
+  loadRule: (rule) =>
+    set({
+      name: rule.name,
+      severity: rule.severity as "info" | "warning" | "critical",
+      scope: rule.scope as "watchlist" | "single",
+      ticker: rule.ticker || "",
+      conditions: (typeof rule.conditions === "string"
+        ? JSON.parse(rule.conditions)
+        : rule.conditions) as AlertCondition[],
+      logic: rule.logic as "AND" | "OR",
+    }),
   reset: () =>
     set({
       name: "",

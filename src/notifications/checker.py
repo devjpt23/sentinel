@@ -10,6 +10,7 @@ rest of the Sentinel codebase.
 """
 
 import logging
+import re
 from typing import Optional, List, Dict
 
 from src.data.fetcher import fetch_company_data
@@ -116,6 +117,11 @@ def run_check_for_ticker(user_id: int, ticker: str) -> List[Dict]:
             f"Custom alert evaluation failed for {ticker}", exc_info=True
         )
 
+    # 5c. Add current price context to all notifications for push formatting
+    current_price = data.get("market", {}).get("price")
+    for n in notifications:
+        n["current_price"] = current_price
+
     # 6. Save new snapshot + update check log
     save_snapshot(user_id, ticker, current)
     update_check_log(user_id, ticker)
@@ -143,6 +149,45 @@ def check_all_tickers_for_user(user_id: int) -> Dict[str, List[Dict]]:
     return results
 
 
+def format_push_notification(
+    notification: Dict,
+) -> tuple:
+    """Format a notification dict for push delivery.
+
+    Strips the ticker prefix from the body (already in the title),
+    wraps to 120 chars, and extracts a structured data payload.
+
+    Returns (title, body, extra_data_dict).
+    """
+    title = notification.get("title", "Alert")
+    body = notification.get("body", "") or ""
+    ticker = notification.get("ticker", "")
+
+    # Strip ticker prefix from body if present (custom alerts include it)
+    if ticker:
+        body = re.sub(rf"^{re.escape(ticker)}:\s*", "", body)
+
+    # For custom alerts, add current price context
+    if notification.get("type") == "custom_alert":
+        price = notification.get("current_price")
+        if price is not None:
+            price_context = f" | Price: ${float(price):.2f}"
+            if price_context not in body:
+                body += price_context
+
+    # Wrap to 120 chars
+    if len(body) > 120:
+        body = body[:117] + "..."
+
+    # Build extra data payload
+    extra_data = {}
+    price = notification.get("current_price")
+    if price is not None:
+        extra_data["current_price"] = round(float(price), 2)
+
+    return title, body, extra_data
+
+
 def deliver_notifications(user_id: int, notifications_by_ticker: Dict[str, List[Dict]]) -> int:
     """Deliver notifications via Telegram and Web Push. Returns total delivered count."""
     prefs = get_preferences(user_id)
@@ -163,15 +208,19 @@ def deliver_notifications(user_id: int, notifications_by_ticker: Dict[str, List[
                     continue
                 rule = get_custom_alert_rule_by_id(rule_id)
                 if rule and rule.get("fire_push", 1):
+                    title, body, extra_data = format_push_notification(n)
                     results = send_push_notifications(
                         subscriptions=user_push_subs,
-                        title=f"{n.get('ticker', '?')}: {n.get('title', 'Alert')}",
-                        body=n.get("body", ""),
+                        title=title,
+                        body=body,
                         data={
                             "ticker": n.get("ticker"),
                             "rule_id": rule_id,
                             "notification_id": n.get("id"),
                             "url": f"/company/{n.get('ticker', '')}",
+                            "severity": n.get("severity"),
+                            "notification_type": n.get("type"),
+                            **extra_data,
                         },
                     )
                     for r in results:
@@ -281,14 +330,23 @@ def _compare_health(
     old_verdict = previous.get("health_verdict", "?")
     new_verdict = current.get("health_verdict", "?")
 
+    delta_val = abs(delta)
+    if delta < 0:
+        body = (
+            f"Score dropped from {old_score} ({old_verdict}) → {new_score} ({new_verdict}) "
+            f"— a {delta_val}-point decline. Review financial health in the dashboard."
+        )
+    else:
+        body = (
+            f"Score improved from {old_score} ({old_verdict}) → {new_score} ({new_verdict}) "
+            f"— a {delta_val}-point gain."
+        )
+
     return {
         "type": "health_change",
         "severity": severity,
         "title": f"Health Score {direction} {emoji}",
-        "body": (
-            f"Score changed from {old_score} ({old_verdict}) to {new_score} ({new_verdict}). "
-            f"The composite health score reflects profitability, leverage, and efficiency."
-        ),
+        "body": body,
         "old_value": str(old_score),
         "new_value": str(new_score),
     }
@@ -354,15 +412,22 @@ def _compare_risk_flags(
         direction = "Decreased"
         emoji = "✅"
 
+    if new_count > old_count:
+        body = (
+            f"{new_count} new red flags detected (was {old_count}). "
+            f"Check the Risk Analysis page for details on each flag."
+        )
+    else:
+        body = (
+            f"Red flags decreased from {old_count} to {new_count}. "
+            f"Risk posture is improving."
+        )
+
     return {
         "type": "risk_flag_change",
         "severity": severity,
         "title": f"Red Flags {direction} {emoji}",
-        "body": (
-            f"Red flag count changed from {old_count} to {new_count}. "
-            f"Red flags are automated checks for financial distress, "
-            f"accounting concerns, and operational weakness."
-        ),
+        "body": body,
         "old_value": str(old_count),
         "new_value": str(new_count),
     }
@@ -391,20 +456,24 @@ def _compare_zscore(
         severity = "warning"
         direction = "Worsened"
         emoji = "⚠️"
+        body = (
+            f"Z-Score shifted from {old_zone} ({old_z}) → {new_zone} ({new_z}). "
+            f"Bankruptcy risk is elevated — review leverage and liquidity."
+        )
     else:
         severity = "info"
         direction = "Improved"
         emoji = "✅"
+        body = (
+            f"Z-Score shifted from {old_zone} ({old_z}) → {new_zone} ({new_z}). "
+            f"Bankruptcy risk is decreasing."
+        )
 
     return {
         "type": "zscore_zone_change",
         "severity": severity,
         "title": f"Z-Score Zone {direction} {emoji}",
-        "body": (
-            f"Altman Z-Score zone changed from {old_zone} ({old_z}) to "
-            f"{new_zone} ({new_z}). The Z-Score measures bankruptcy risk "
-            f"using leverage, liquidity, profitability, and market value."
-        ),
+        "body": body,
         "old_value": f"{old_zone} ({old_z})",
         "new_value": f"{new_zone} ({new_z})",
     }
@@ -433,15 +502,22 @@ def _compare_fscore(
         direction = "Improved"
         emoji = "📈"
 
+    if delta < 0:
+        body = (
+            f"F-Score declined from {old_fs}/9 → {new_fs}/9 ({delta:+d} points). "
+            f"Financial strength is weakening."
+        )
+    else:
+        body = (
+            f"F-Score improved from {old_fs}/9 → {new_fs}/9 (+{delta} points). "
+            f"Financial strength is getting better."
+        )
+
     return {
         "type": "fscore_change",
         "severity": severity,
         "title": f"Piotroski F-Score {direction} {emoji}",
-        "body": (
-            f"F-Score changed from {old_fs}/9 to {new_fs}/9 (Δ {delta:+d}). "
-            f"The Piotroski F-Score rates financial strength across 9 criteria: "
-            f"profitability, leverage/liquidity, and operating efficiency."
-        ),
+        "body": body,
         "old_value": str(old_fs),
         "new_value": str(new_fs),
     }
