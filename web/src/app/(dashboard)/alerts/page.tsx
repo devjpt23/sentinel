@@ -65,10 +65,10 @@ function AuthRequired() {
   );
 }
 
-function DeliveryChannels() {
+function DeliveryChannels({ userId }: { userId: number }) {
   const [pushStatus, setPushStatus] = useState<"denied" | "default" | "granted">("default");
   const [pushSubscribed, setPushSubscribed] = useState(false);
-  const { data: prefs } = usePreferences(0);
+  const { data: prefs } = usePreferences(userId);
 
   useEffect(() => {
     getPushStatus().then((s) => {
@@ -560,9 +560,29 @@ function PreferencesSection({ userId }: { userId: number }) {
   );
 }
 
+function AlertsPageFallback() {
+  return (
+    <div className="space-y-6 max-w-4xl">
+      <div>
+        <h2 className="text-2xl font-bold text-[#f0f4f0]">Notification Settings</h2>
+        <p className="text-[#6b7f8e] mt-1">Manage alerts, delivery channels, and notification preferences</p>
+      </div>
+      <Card>
+        <CardContent className="py-12 text-center">
+          <AlertTriangle className="h-10 w-10 mx-auto mb-3 text-yellow-400" />
+          <p className="text-[#c8d8e4] font-medium">Unable to load alerts</p>
+          <p className="text-sm text-[#6b7f8e] mt-1 mb-4">The alert service is temporarily unavailable. Your rules are still active and will continue to fire.</p>
+          <Button variant="outline" onClick={() => window.location.reload()}>Retry</Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 export default function AlertsPage() {
   const { data: userData, isLoading: userLoading } = useUser();
   const [showBuilder, setShowBuilder] = useState(false);
+  const queryClient = useQueryClient();
 
   if (userLoading) {
     return <div className="flex items-center justify-center min-h-[60vh]"><Skeleton className="h-8 w-48" /></div>;
@@ -573,7 +593,6 @@ export default function AlertsPage() {
   }
 
   const userId = userData.id;
-  const queryClient = useQueryClient();
 
   const handleQuickAdd = (template: AlertTemplate) => {
     const body = {
@@ -602,7 +621,7 @@ export default function AlertsPage() {
       {/* Delivery Channels */}
       <div>
         <h3 className="text-sm font-semibold text-[#c8d8e4] mb-3">Delivery Channels</h3>
-        <DeliveryChannels />
+        <DeliveryChannels userId={userId} />
       </div>
 
       <Separator />

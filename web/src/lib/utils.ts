@@ -30,8 +30,10 @@ export function formatNumber(value: number | null | undefined): string {
 }
 
 export function formatRelativeTime(dateStr: string): string {
+  if (!dateStr) return "Unknown";
   const now = new Date();
   const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return "Unknown";
   const diffMs = now.getTime() - date.getTime();
   const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));

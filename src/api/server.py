@@ -1120,8 +1120,6 @@ def api_screener():
         sort_by = request.args.get("sort", "")
         df = fetch_screener_obb(country=country)
         if df is None or df.empty:
-            df = _fetch_screener_yfinance(limit=limit * 2)
-        if df is None or df.empty:
             df = _screener_mock_data()
         if df is None or df.empty:
             return jsonify({"stocks": []})
@@ -1199,6 +1197,29 @@ def api_sectors_search():
     industry = request.args.get("industry", "")
     try:
         results = get_companies_matching(q, sector=sector, industry=industry)
+        # Enrich first 50 results with price data
+        import yfinance as yf  # type: ignore
+        for r in results[:50]:
+            try:
+                t = yf.Ticker(r.get("ticker", ""))
+                info = t.fast_info
+                price = getattr(info, "last_price", None) or getattr(info, "previous_close", None)
+                if price is not None:
+                    r["price"] = round(float(price), 2)
+                    mcap = getattr(info, "market_cap", None)
+                    r["marketCap"] = int(mcap) if mcap else None
+                    pe = getattr(info, "trailing_pe", None)
+                    r["pe"] = round(float(pe), 2) if pe else None
+                    hist = t.history(period="5d")
+                    change = 0.0
+                    if len(hist) >= 2:
+                        prev = hist["Close"].iloc[-2]
+                        curr = hist["Close"].iloc[-1]
+                        if prev and prev > 0:
+                            change = ((curr - prev) / prev) * 100
+                    r["change"] = round(change, 2)
+            except Exception:
+                pass
         return jsonify({"results": results})
     except Exception as e:
         return jsonify({"error": str(e), "results": []}), 500
