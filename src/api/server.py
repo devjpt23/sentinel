@@ -180,6 +180,26 @@ def _resolve_user_id_from_session():
     return user["id"]
 
 
+def _check_session_owns_user_id(user_id):
+    """Verify the session in X-Session-Token matches the given user_id.
+
+    Returns None if authorized, or a (response, status_code) tuple if
+    unauthorized (401 missing/invalid token, 403 forbidden).
+
+    Use at the top of any endpoint that accepts user_id from the URL or
+    request body to prevent IDOR (Insecure Direct Object Reference).
+    """
+    session_token = request.headers.get("X-Session-Token")
+    if not session_token:
+        return jsonify({"error": "Missing session token"}), 401
+    user = restore_user_from_session(session_token)
+    if not user:
+        return jsonify({"error": "Invalid session"}), 401
+    if str(user["id"]) != str(user_id):
+        return jsonify({"error": "Forbidden"}), 403
+    return None
+
+
 @app.before_request
 def before_request():
     """Validate API key and check rate limit on every request."""
@@ -386,6 +406,9 @@ def auth_password_reset_confirm():
 
 @app.route("/api/watchlist/<int:user_id>", methods=["GET"])
 def api_get_watchlist(user_id):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     tickers = load_user_watchlist(user_id)
     return jsonify({"user_id": user_id, "tickers": tickers})
 
@@ -395,6 +418,9 @@ def api_add_ticker():
     body = request.get_json(silent=True)
     if not body or "user_id" not in body or "ticker" not in body:
         return jsonify({"error": "user_id and ticker are required"}), 400
+    check = _check_session_owns_user_id(body["user_id"])
+    if check:
+        return check
     try:
         add_user_ticker(body["user_id"], body["ticker"])
         _invalidate_enriched_cache(body["user_id"])
@@ -406,6 +432,9 @@ def api_add_ticker():
 @app.route("/api/watchlist/<int:user_id>/enriched", methods=["GET"])
 def api_get_enriched_watchlist(user_id):
     """Return watchlist tickers enriched with price, health, risk, and growth data."""
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     cache_key = f"enriched:{user_id}"
@@ -472,6 +501,9 @@ def api_get_enriched_watchlist(user_id):
 
 @app.route("/api/watchlist/<int:user_id>/<ticker>", methods=["DELETE"])
 def api_remove_ticker(user_id, ticker):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     try:
         remove_user_ticker(user_id, ticker)
         _invalidate_enriched_cache(user_id)
@@ -483,6 +515,9 @@ def api_remove_ticker(user_id, ticker):
 @app.route("/api/watchlist/<int:user_id>", methods=["DELETE"])
 def api_clear_watchlist(user_id):
     """Clear entire watchlist."""
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     try:
         clear_user_watchlist(user_id)
         _invalidate_enriched_cache(user_id)
@@ -494,6 +529,9 @@ def api_clear_watchlist(user_id):
 @app.route("/api/watchlist/<int:user_id>/count", methods=["GET"])
 def api_watchlist_count(user_id):
     """Watchlist size."""
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     count = get_user_watchlist_count(user_id)
     return jsonify({"count": count})
 
@@ -501,6 +539,9 @@ def api_watchlist_count(user_id):
 @app.route("/api/watchlist/<int:user_id>/has/<ticker>", methods=["GET"])
 def api_watchlist_has(user_id, ticker):
     """Check if ticker is in watchlist."""
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     watched = is_ticker_watched_by_user(user_id, ticker)
     return jsonify({"watched": watched})
 
@@ -509,6 +550,9 @@ def api_watchlist_has(user_id, ticker):
 
 @app.route("/api/user/<int:user_id>", methods=["GET"])
 def api_get_user(user_id):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     user = get_user(user_id)
     if not user:
         return jsonify({"error": "user not found"}), 404
@@ -559,6 +603,9 @@ def api_login():
 
 @app.route("/api/user/<int:user_id>/link-telegram", methods=["POST"])
 def api_link_telegram(user_id):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     body = request.get_json(silent=True)
     if not body or "chat_id" not in body:
         return jsonify({"error": "chat_id is required"}), 400
@@ -1236,6 +1283,9 @@ def api_sectors_search():
 
 @app.route("/api/notifications/<int:user_id>", methods=["GET"])
 def api_get_notifications(user_id):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     limit = request.args.get("limit", 10, type=int)
     unread_only = request.args.get("unread_only", "false").lower() == "true"
     notifications = get_notifications(user_id, limit=limit, unread_only=unread_only)
@@ -1244,12 +1294,18 @@ def api_get_notifications(user_id):
 
 @app.route("/api/notifications/<int:user_id>/unread-count", methods=["GET"])
 def api_unread_count(user_id):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     count = get_unread_count(user_id)
     return jsonify({"count": count})
 
 
 @app.route("/api/notifications/<int:user_id>/mark-read", methods=["POST"])
 def api_mark_read(user_id):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     body = request.get_json(silent=True)
     if not body or "notification_id" not in body:
         return jsonify({"error": "notification_id is required"}), 400
@@ -1262,6 +1318,9 @@ def api_mark_read(user_id):
 
 @app.route("/api/notifications/<int:user_id>/mark-all-read", methods=["POST"])
 def api_mark_all_read(user_id):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     try:
         mark_all_read(user_id)
         return jsonify({"ok": True})
@@ -1271,6 +1330,9 @@ def api_mark_all_read(user_id):
 
 @app.route("/api/notifications/<int:user_id>/dismiss", methods=["POST"])
 def api_dismiss_notification(user_id):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     body = request.get_json(silent=True)
     if not body or "notification_id" not in body:
         return jsonify({"error": "notification_id is required"}), 400
@@ -1304,6 +1366,9 @@ def api_notification_stats():
 @app.route("/api/alerts/<int:user_id>", methods=["GET"])
 def api_get_alerts(user_id):
     """List custom alert rules."""
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     enabled_only = request.args.get("enabled_only", "false").lower() == "true"
     rules = get_custom_alert_rules(user_id, enabled_only=enabled_only)
     for rule in rules:
@@ -1319,6 +1384,9 @@ def api_get_alerts(user_id):
 @app.route("/api/alerts/<int:user_id>", methods=["POST"])
 def api_create_alert(user_id):
     """Create alert rule."""
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     body = request.get_json(silent=True)
     if not body or "name" not in body:
         return jsonify({"error": "name is required"}), 400
@@ -1344,6 +1412,9 @@ def api_create_alert(user_id):
 @app.route("/api/alerts/<int:user_id>/<int:rule_id>", methods=["PUT"])
 def api_update_alert(user_id, rule_id):
     """Update alert rule."""
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     body = request.get_json(silent=True)
     if not body:
         return jsonify({"error": "request body is required"}), 400
@@ -1361,6 +1432,9 @@ def api_update_alert(user_id, rule_id):
 @app.route("/api/alerts/<int:user_id>/<int:rule_id>", methods=["DELETE"])
 def api_delete_alert(user_id, rule_id):
     """Delete alert rule."""
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     try:
         existing = get_custom_alert_rule_by_id(rule_id)
         if not existing or existing["user_id"] != user_id:
@@ -1374,6 +1448,9 @@ def api_delete_alert(user_id, rule_id):
 @app.route("/api/alerts/<int:user_id>/<int:rule_id>/toggle", methods=["POST"])
 def api_toggle_alert(user_id, rule_id):
     """Enable/disable rule."""
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     body = request.get_json(silent=True)
     try:
         existing = get_custom_alert_rule_by_id(rule_id)
@@ -1409,12 +1486,18 @@ def api_alert_signals():
 
 @app.route("/api/preferences/<int:user_id>", methods=["GET"])
 def api_get_preferences(user_id):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     prefs = get_preferences(user_id)
     return jsonify({"preferences": prefs})
 
 
 @app.route("/api/preferences/<int:user_id>", methods=["POST"])
 def api_set_preferences(user_id):
+    check = _check_session_owns_user_id(user_id)
+    if check:
+        return check
     body = request.get_json(silent=True)
     if not body:
         return jsonify({"error": "request body is required"}), 400
