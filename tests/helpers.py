@@ -53,6 +53,21 @@ def seed_custom_alert_rule(
     return conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 
+def seed_news_article(conn, ticker: str = "AAPL", url: str = "https://example.com/article") -> str:
+    """Insert a news article into ticker_news_tracker. Returns article_id."""
+    import hashlib
+    article_id = hashlib.sha256(url.encode()).hexdigest()
+    title_hash = hashlib.sha256(f"Title {url}".lower().strip().encode()).hexdigest()
+    conn.execute(
+        """INSERT OR IGNORE INTO ticker_news_tracker
+           (ticker, article_id, title_hash, url, title, summary, publisher, published, detected_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (ticker.upper(), article_id, title_hash, url, f"Title {url}", "Summary", "Bloomberg", "2026-06-24T10:00:00Z"),
+    )
+    conn.commit()
+    return article_id
+
+
 def make_market_data(price: float = 150.0) -> Dict:
     """Build a minimal market data dict for reconciliation tests."""
     return {

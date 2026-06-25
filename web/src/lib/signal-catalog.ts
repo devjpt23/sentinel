@@ -215,6 +215,30 @@ export const SIGNAL_CATALOG: CatalogEntry[] = [
     operators: [">", "<", ">=", "<=", "=="],
     requires_history: false,
   },
+
+  // ── News ──────────────────────────────────────────────────────
+  {
+    id: "new_news",
+    name: "New News Article",
+    category: "News",
+    value_type: "boolean",
+    description:
+      "A new news article was published for this ticker (checked every ~15 min)",
+    unit: "",
+    operators: ["=="],
+    requires_history: false,
+  },
+  {
+    id: "new_industry_news",
+    name: "Industry News Activity",
+    category: "News",
+    value_type: "number",
+    description:
+      "New news across all tickers in your watchlist's sectors (checked every ~15 min)",
+    unit: "articles",
+    operators: [">", ">=", "=="],
+    requires_history: false,
+  },
 ];
 
 // ─── Categories ──────────────────────────────────────────────────────
@@ -223,6 +247,7 @@ export const SIGNAL_CATEGORIES: string[] = [
   "Price & Volume",
   "Technical",
   "Fundamental",
+  "News",
 ];
 
 // ─── Grouped by Category ─────────────────────────────────────────────

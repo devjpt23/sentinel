@@ -158,6 +158,25 @@ def init_notification_db() -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_push_sub_user
             ON push_subscriptions(user_id);
+
+        CREATE TABLE IF NOT EXISTS ticker_news_tracker (
+            ticker TEXT NOT NULL,
+            article_id TEXT NOT NULL,
+            title_hash TEXT NOT NULL,
+            url TEXT NOT NULL,
+            title TEXT NOT NULL,
+            summary TEXT,
+            publisher TEXT,
+            published TEXT NOT NULL,
+            detected_at TEXT NOT NULL,
+            notified INTEGER DEFAULT 0,
+            PRIMARY KEY (ticker, article_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_news_detected
+            ON ticker_news_tracker(ticker, detected_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_news_notified
+            ON ticker_news_tracker(notified)
+            WHERE notified = 0;
     """)
     # Migration: add telegram_bot_token column if upgrading from older schema
     try:
@@ -816,3 +835,135 @@ def save_custom_alert_snapshot(
     )
     conn.commit()
     conn.close()
+
+
+# ─── Ticker News Tracker CRUD ───────────────────────────────────
+
+def insert_news_article(
+    ticker: str,
+    article_id: str,
+    title_hash: str,
+    url: str,
+    title: str,
+    summary: Optional[str] = None,
+    publisher: Optional[str] = None,
+    published: Optional[str] = None,
+) -> bool:
+    """Insert a news article into ticker_news_tracker.
+
+    Returns True if a new row was inserted, False if duplicate (IGNOREd).
+    """
+    conn = _get_conn()
+    cursor = conn.execute(
+        """INSERT OR IGNORE INTO ticker_news_tracker
+           (ticker, article_id, title_hash, url, title, summary, publisher, published, detected_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))""",
+        (ticker.upper(), article_id, title_hash, url, title, summary, publisher, published),
+    )
+    conn.commit()
+    inserted = cursor.rowcount > 0
+    conn.close()
+    return inserted
+
+
+def count_unnotified_news(ticker: str) -> int:
+    """Return the count of articles for this ticker with notified=0."""
+    conn = _get_conn()
+    count = conn.execute(
+        "SELECT COUNT(*) FROM ticker_news_tracker WHERE ticker = ? AND notified = 0",
+        (ticker.upper(),),
+    ).fetchone()[0]
+    conn.close()
+    return count
+
+
+def get_unnotified_articles(ticker: str) -> List[Dict]:
+    """Return list of dicts for articles with notified=0, ordered by detected_at ASC."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT * FROM ticker_news_tracker WHERE ticker = ? AND notified = 0 ORDER BY detected_at ASC",
+        (ticker.upper(),),
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def mark_article_notified(ticker: str, article_id: str) -> None:
+    """Set notified=1 for a specific article."""
+    conn = _get_conn()
+    conn.execute(
+        "UPDATE ticker_news_tracker SET notified = 1 WHERE ticker = ? AND article_id = ?",
+        (ticker.upper(), article_id),
+    )
+    conn.commit()
+    conn.close()
+
+
+def mark_articles_notified(ticker: str, article_ids: List[str]) -> None:
+    """Set notified=1 for a list of article_ids for a ticker."""
+    if not article_ids:
+        return
+    conn = _get_conn()
+    placeholders = ",".join("?" for _ in article_ids)
+    conn.execute(
+        f"UPDATE ticker_news_tracker SET notified = 1 WHERE ticker = ? AND article_id IN ({placeholders})",
+        [ticker.upper()] + article_ids,
+    )
+    conn.commit()
+    conn.close()
+
+
+def mark_old_news_skipped(hours: int = 24) -> int:
+    """Set notified=2 for articles with notified=0 that are older than ``hours``.
+
+    Returns the number of rows updated.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    conn = _get_conn()
+    cursor = conn.execute(
+        "UPDATE ticker_news_tracker SET notified = 2 WHERE notified = 0 AND detected_at < ?",
+        (cutoff,),
+    )
+    conn.commit()
+    affected = cursor.rowcount
+    conn.close()
+    return affected
+
+
+def purge_old_news_entries(days: int = 7) -> int:
+    """Delete articles older than ``days``. Returns the number of rows deleted."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    conn = _get_conn()
+    cursor = conn.execute(
+        "DELETE FROM ticker_news_tracker WHERE detected_at < ?",
+        (cutoff,),
+    )
+    conn.commit()
+    deleted = cursor.rowcount
+    conn.close()
+    return deleted
+
+
+def get_tickers_with_unnotified_news() -> List[tuple]:
+    """Return list of (ticker, count) tuples for tickers with at least one unnotified article."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT ticker, COUNT(*) AS cnt FROM ticker_news_tracker WHERE notified = 0 GROUP BY ticker"
+    ).fetchall()
+    conn.close()
+    return [(r["ticker"], r["cnt"]) for r in rows]
+
+
+def count_news_title_hash(ticker: str, title_hash: str, hours: int = 24) -> int:
+    """Return count of articles for this ticker with matching title_hash in the last N hours.
+
+    Used for secondary dedup to catch near-duplicate articles with slightly different IDs.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    conn = _get_conn()
+    count = conn.execute(
+        "SELECT COUNT(*) FROM ticker_news_tracker WHERE ticker = ? AND title_hash = ? AND detected_at > ?",
+        (ticker.upper(), title_hash, cutoff),
+    ).fetchone()[0]
+    conn.close()
+    return count

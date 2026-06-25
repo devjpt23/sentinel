@@ -218,7 +218,7 @@ export interface SignalEntry {
   id: string;
   name: string;
   category: string;
-  value_type: "number";
+  value_type: "number" | "boolean";
   requires_days?: boolean;
   requires_period?: boolean;
 }

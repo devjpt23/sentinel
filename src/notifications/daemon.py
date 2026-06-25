@@ -10,6 +10,7 @@ Usage:
 """
 
 import sys
+import threading
 import time
 import logging
 from datetime import datetime
@@ -31,6 +32,7 @@ from src.data.ticker_fetcher import TickerDataFetcher
 from src.notifications.checker import (
     check_all_tickers_for_user,
     deliver_notifications,
+    check_ticker_news,
 )
 from src.notifications.custom_alerts import evaluate_custom_alerts
 from src.notifications.telegram_bot import poll_user_bot
@@ -40,6 +42,26 @@ logger = logging.getLogger(__name__)
 # Track last check time per user (in-memory, reset on daemon restart).
 # Keys are user_id, values are Unix timestamps from time.time().
 _last_check: dict[int, float] = {}
+
+_last_news_check = 0.0
+NEWS_CHECK_INTERVAL = 900  # 15 minutes
+
+
+def news_check_tick() -> None:
+    """Run news check if enough time has passed (every 15 min).
+
+    Fire-and-forget: spawns a daemon thread so it doesn't block
+    the main reconciliation loop.
+    """
+    global _last_news_check
+    now = time.time()
+    if now - _last_news_check < NEWS_CHECK_INTERVAL:
+        return
+    _last_news_check = now
+
+    logger.info("News check tick starting")
+    thread = threading.Thread(target=check_ticker_news, daemon=True)
+    thread.start()
 
 
 def check_tick() -> None:
@@ -267,7 +289,7 @@ def main() -> None:
     last_maintenance_tick = time.time()
 
     logger.info(
-        "Entering main loop (reconciliation=60s, check=60s, poll=5s, maintenance=24h)"
+        "Entering main loop (reconciliation=60s, check=60s, poll=5s, news=15m, maintenance=24h)"
     )
 
     while True:
@@ -282,6 +304,9 @@ def main() -> None:
         if now - last_check_tick >= 60:
             check_tick()
             last_check_tick = now
+
+        # News check tick — internally gated to 15 minutes
+        news_check_tick()
 
         # Telegram poll tick — every 5 seconds
         if now - last_poll_tick >= 5:

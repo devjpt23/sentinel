@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { flexRender, getCoreRowModel, getSortedRowModel, getPaginationRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table";
-import { Bell, CheckCircle, AlertCircle, Info, TriangleAlert, MailCheck, Trash2, Lock } from "lucide-react";
+import { Bell, CheckCircle, AlertCircle, Info, TriangleAlert, MailCheck, Trash2, Lock, Filter } from "lucide-react";
 import { api } from "@/lib/api-client";
 import { formatRelativeTime } from "@/lib/utils";
 import { useUser } from "@/hooks/use-watchlist";
@@ -18,7 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
-interface NotificationItem { id: string; ticker: string; body: string; severity: "info" | "warning" | "critical"; created_at: string; read: boolean; dismissed: boolean; }
+interface NotificationItem { id: string; ticker: string; body: string; severity: "info" | "warning" | "critical"; created_at: string; read: boolean; dismissed: boolean; notification_type?: string; }
 
 
 function severityIcon(severity: string) {
@@ -62,6 +62,7 @@ function AuthRequired() {
 export default function NotificationsPage() {
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [severityFilter, setSeverityFilter] = useState("all");
+  const [typeFilter, setTypeFilter] = useState("all");
   const [tickerFilter, setTickerFilter] = useState("");
   const [page, setPage] = useState(0);
   const pageSize = 20;
@@ -103,10 +104,11 @@ export default function NotificationsPage() {
 
   const allNotifications = useMemo(() => {
     let items = data?.notifications ?? [];
+    if (typeFilter !== "all") items = items.filter((n) => n.notification_type === typeFilter);
     if (severityFilter !== "all") items = items.filter((n) => n.severity === severityFilter);
     if (tickerFilter) items = items.filter((n) => n.ticker.toLowerCase().includes(tickerFilter.toLowerCase()));
     return items;
-  }, [data, severityFilter, tickerFilter]);
+  }, [data, typeFilter, severityFilter, tickerFilter]);
 
   const paginated = allNotifications.slice(page * pageSize, (page + 1) * pageSize);
   const totalPages = Math.ceil(allNotifications.length / pageSize);
@@ -167,12 +169,24 @@ export default function NotificationsPage() {
           <label className="text-xs text-[#6b7f8e] mb-1 block">Ticker</label>
           <Input placeholder="Filter ticker" value={tickerFilter} onChange={(e) => setTickerFilter(e.target.value)} />
         </div>
+        <div className="w-40">
+          <label className="text-xs text-[#6b7f8e] mb-1 block">Type</label>
+          <Select value={typeFilter} onValueChange={setTypeFilter}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All</SelectItem>
+              <SelectItem value="news">News</SelectItem>
+              <SelectItem value="custom_alert">Alerts</SelectItem>
+              <SelectItem value="health_change">Health</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
       <div className="rounded-lg border border-[#1e2d3a]">
         {isLoading ? (<div className="p-8 space-y-3">{Array.from({ length: 5 }).map((_, i) => (<Skeleton key={i} className="h-12 w-full" />))}</div>) : (<>
           <Table>
             <TableHeader>{table.getHeaderGroups().map((hg) => (<TableRow key={hg.id}>{hg.headers.map((h) => (<TableHead key={h.id}>{h.isPlaceholder ? null : flexRender(h.column.columnDef.header, h.getContext())}</TableHead>))}</TableRow>))}</TableHeader>
-            <TableBody>{table.getRowModel().rows.length === 0 ? (<TableRow><TableCell colSpan={columns.length} className="text-center text-[#6b7f8e] py-8 px-4">No notifications yet. Configure alerts in Settings to receive notifications when your watched stocks trigger alerts.</TableCell></TableRow>) : table.getRowModel().rows.map((row) => (<TableRow key={row.original.id} className={row.original.read ? "" : "bg-[#1a2a38]/30"}>{row.getVisibleCells().map((cell) => (<TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>))}</TableRow>))}</TableBody>
+            <TableBody>{table.getRowModel().rows.length === 0 ? (<TableRow><TableCell colSpan={columns.length} className="text-center text-[#6b7f8e] py-8 px-4">No notifications yet. Configure alerts in Settings to receive notifications when your watched stocks trigger alerts, or enable News Alerts for breaking news.</TableCell></TableRow>) : table.getRowModel().rows.map((row) => (<TableRow key={row.original.id} className={row.original.read ? "" : "bg-[#1a2a38]/30"}>{row.getVisibleCells().map((cell) => (<TableCell key={cell.id}>{flexRender(cell.column.columnDef.cell, cell.getContext())}</TableCell>))}</TableRow>))}</TableBody>
           </Table>
           {totalPages > 1 && (
             <div className="flex items-center justify-between px-4 py-3 border-t border-[#1e2d3a]">

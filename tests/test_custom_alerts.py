@@ -11,7 +11,7 @@ from src.notifications.custom_alerts import (
     _op_crosses_above,
     _op_crosses_below,
 )
-from tests.helpers import seed_custom_alert_rule, make_market_data
+from tests.helpers import seed_custom_alert_rule, make_market_data, seed_news_article
 
 
 # ─── _evaluate_single_rule: rule_id in return dict ──────────────
@@ -507,3 +507,226 @@ class TestRuleBodyGeneration:
         import json as j
         vm = j.loads(result["new_value"])
         assert "price" in vm
+
+
+# ─── _extract_new_news ──────────────────────────────────────────────
+
+class TestExtractNewNews:
+    """_extract_new_news must return article count during news tick, 0 otherwise."""
+
+    def test_returns_count_during_news_check(self, notification_db):
+        """With news_check_active=True, should return count of unnotified articles."""
+        from src.notifications.custom_alerts import _extract_new_news
+        url = "https://example.com/news-article-1"
+        seed_news_article(notification_db, ticker="AAPL", url=url)
+        data = {"_ticker": "AAPL", "_news_check_context": {"news_check_active": True}}
+        result = _extract_new_news(data, {}, None, {})
+        assert result == 1.0
+
+    def test_returns_zero_outside_news_check(self, notification_db):
+        """Without news_check_active, should return 0.0 regardless of articles."""
+        from src.notifications.custom_alerts import _extract_new_news
+        url = "https://example.com/news-article-2"
+        seed_news_article(notification_db, ticker="AAPL", url=url)
+        data = {"_ticker": "AAPL"}
+        result = _extract_new_news(data, {}, None, {})
+        assert result == 0.0
+
+    def test_returns_zero_without_ticker(self, notification_db):
+        """Without _ticker in data, should return 0.0."""
+        from src.notifications.custom_alerts import _extract_new_news
+        data = {"_news_check_context": {"news_check_active": True}}
+        result = _extract_new_news(data, {}, None, {})
+        assert result == 0.0
+
+    def test_returns_zero_when_no_news(self, notification_db):
+        """With news_check_active but no articles, should return 0.0."""
+        from src.notifications.custom_alerts import _extract_new_news
+        data = {"_ticker": "AAPL", "_news_check_context": {"news_check_active": True}}
+        result = _extract_new_news(data, {}, None, {})
+        assert result == 0.0
+
+    def test_count_decreases_after_notification(self, notification_db):
+        """After marking article as notified, the count should drop to 0."""
+        from src.notifications.custom_alerts import _extract_new_news
+        from src.data.notification_db import mark_article_notified
+        url = "https://example.com/news-article-3"
+        aid = seed_news_article(notification_db, ticker="AAPL", url=url)
+        data = {"_ticker": "AAPL", "_news_check_context": {"news_check_active": True}}
+        assert _extract_new_news(data, {}, None, {}) == 1.0
+        mark_article_notified("AAPL", aid)
+        assert _extract_new_news(data, {}, None, {}) == 0.0
+
+
+# ─── Full evaluate_custom_alerts with new_news signal ───────────────
+
+class TestNewNewsFullEvaluation:
+    """Full pipeline: new_news signal in evaluate_custom_alerts."""
+
+    def test_news_condition_fires_during_news_check(self, notification_db):
+        """A rule with new_news > 0 should fire during news check."""
+        conn = notification_db
+        rid = seed_custom_alert_rule(
+            conn, user_id=1, ticker="AAPL", signal_id="new_news",
+            operator=">", value=0, currently_triggered=0,
+        )
+        # Seed an unnotified article
+        seed_news_article(conn, ticker="AAPL", url="https://example.com/news-fire")
+        data = {
+            "_ticker": "AAPL",
+            "_news_check_context": {"news_check_active": True},
+        }
+        from src.notifications.custom_alerts import evaluate_custom_alerts
+        notifications = evaluate_custom_alerts(1, "AAPL", data, {})
+        assert len(notifications) == 1
+        assert notifications[0]["rule_id"] == rid
+        assert notifications[0]["type"] == "custom_alert"
+
+    def test_news_condition_suppressed_when_triggered(self, notification_db):
+        """When currently_triggered, news rule should not re-fire."""
+        conn = notification_db
+        seed_custom_alert_rule(
+            conn, user_id=1, ticker="AAPL", signal_id="new_news",
+            operator=">", value=0, currently_triggered=1,
+        )
+        seed_news_article(conn, ticker="AAPL", url="https://example.com/news-suppress")
+        data = {
+            "_ticker": "AAPL",
+            "_news_check_context": {"news_check_active": True},
+        }
+        from src.notifications.custom_alerts import evaluate_custom_alerts
+        notifications = evaluate_custom_alerts(1, "AAPL", data, {})
+        assert len(notifications) == 0
+
+    def test_news_condition_outside_news_tick(self, notification_db):
+        """Outside news tick, new_news should be 0 and rule should not fire."""
+        conn = notification_db
+        seed_custom_alert_rule(
+            conn, user_id=1, ticker="AAPL", signal_id="new_news",
+            operator=">", value=0, currently_triggered=0,
+        )
+        seed_news_article(conn, ticker="AAPL", url="https://example.com/news-outside")
+        data = {"_ticker": "AAPL"}  # no _news_check_context
+        from src.notifications.custom_alerts import evaluate_custom_alerts
+        notifications = evaluate_custom_alerts(1, "AAPL", data, {})
+        assert len(notifications) == 0
+
+    def test_news_condition_not_met(self, notification_db):
+        """Rule with new_news > 10 should not fire when count is 1."""
+        conn = notification_db
+        seed_custom_alert_rule(
+            conn, user_id=1, ticker="AAPL", signal_id="new_news",
+            operator=">", value=10, currently_triggered=0,
+        )
+        seed_news_article(conn, ticker="AAPL", url="https://example.com/news-low")
+        data = {
+            "_ticker": "AAPL",
+            "_news_check_context": {"news_check_active": True},
+        }
+        from src.notifications.custom_alerts import evaluate_custom_alerts
+        notifications = evaluate_custom_alerts(1, "AAPL", data, {})
+        assert len(notifications) == 0
+
+    def test_news_signal_in_signals_catalog(self, notification_db):
+        """new_news must appear in the signal catalog."""
+        from src.notifications.custom_alerts import SIGNAL_CATALOG
+        assert "new_news" in SIGNAL_CATALOG
+        sig = SIGNAL_CATALOG["new_news"]
+        assert sig["category"] == "News"
+        assert ">" in sig["operators"]
+        assert sig["requires_history"] is False
+
+
+# ─── _extract_industry_news ────────────────────────────────────────
+
+class TestExtractIndustryNews:
+    """_extract_industry_news must count news across sector peers during news tick."""
+
+    def test_returns_zero_outside_news_check(self, notification_db):
+        """Without news_check_active, should return 0.0."""
+        from src.notifications.custom_alerts import _extract_industry_news
+        data = {"_news_check_context": {"_user_id": 1}}
+        result = _extract_industry_news(data, {}, None, {})
+        assert result == 0.0
+
+    def test_returns_zero_without_user_id(self, notification_db):
+        """Without _user_id in context, should return 0.0."""
+        from src.notifications.custom_alerts import _extract_industry_news
+        data = {"_news_check_context": {"news_check_active": True}}
+        result = _extract_industry_news(data, {}, None, {})
+        assert result == 0.0
+
+    def test_returns_zero_without_peers(self, notification_db, mocker):
+        """When no sector peers found, should return 0.0."""
+        mocker.patch(
+            "src.notifications.checker.get_sector_peer_tickers",
+            return_value=[],
+        )
+        from src.notifications.custom_alerts import _extract_industry_news
+        data = {
+            "_news_check_context": {
+                "news_check_active": True,
+                "_user_id": 1,
+            },
+        }
+        result = _extract_industry_news(data, {}, None, {})
+        assert result == 0.0
+
+    def test_counts_peers_news(self, notification_db, mocker):
+        """Should sum unnotified news counts across all peer tickers."""
+        mocker.patch(
+            "src.notifications.checker.get_sector_peer_tickers",
+            return_value=["NVDA", "INTC"],
+        )
+        # Seed news for both peer tickers
+        from tests.helpers import seed_news_article
+        seed_news_article(notification_db, ticker="NVDA", url="https://example.com/nvda-news")
+        seed_news_article(notification_db, ticker="NVDA", url="https://example.com/nvda-news-2")
+        seed_news_article(notification_db, ticker="INTC", url="https://example.com/intc-news")
+
+        from src.notifications.custom_alerts import _extract_industry_news
+        data = {
+            "_news_check_context": {
+                "news_check_active": True,
+                "_user_id": 1,
+            },
+        }
+        result = _extract_industry_news(data, {}, None, {})
+        assert result == 3.0
+
+    def test_counts_decrease_after_notification(self, notification_db, mocker):
+        """After marking peer articles as notified, count should drop."""
+        mocker.patch(
+            "src.notifications.checker.get_sector_peer_tickers",
+            return_value=["NVDA"],
+        )
+        from tests.helpers import seed_news_article
+        aid = seed_news_article(notification_db, ticker="NVDA", url="https://example.com/nvda-count")
+        from src.data.notification_db import mark_article_notified
+
+        from src.notifications.custom_alerts import _extract_industry_news
+        data = {
+            "_news_check_context": {
+                "news_check_active": True,
+                "_user_id": 1,
+            },
+        }
+        assert _extract_industry_news(data, {}, None, {}) == 1.0
+        mark_article_notified("NVDA", aid)
+        assert _extract_industry_news(data, {}, None, {}) == 0.0
+
+
+# ─── Industry news in signal catalog ──────────────────────────────
+
+class TestIndustryNewsSignalInCatalog:
+    """new_industry_news must be registered in the signal catalog."""
+
+    def test_signal_in_catalog(self, notification_db):
+        """new_industry_news must appear in SIGNAL_CATALOG."""
+        from src.notifications.custom_alerts import SIGNAL_CATALOG
+        assert "new_industry_news" in SIGNAL_CATALOG
+        sig = SIGNAL_CATALOG["new_industry_news"]
+        assert sig["category"] == "News"
+        assert ">" in sig["operators"]
+        assert sig["requires_history"] is False
+        assert sig["extractor"] is not None

@@ -11,6 +11,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Plus,
+  Newspaper,
+  Radio,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { AlertCondition } from "@/types/api";
@@ -161,6 +163,38 @@ const TEMPLATES: TemplateDefinition[] = [
     ],
     logic: "AND",
     icon: AlertCircle,
+  },
+  {
+    name: "Breaking News",
+    description: "Alerts whenever a new news article appears for any watchlist ticker",
+    severity: "info",
+    scope: "watchlist",
+    conditions: [
+      {
+        signal_category: "News",
+        signal_id: "new_news",
+        operator: ">",
+        value: 0,
+      },
+    ],
+    logic: "AND",
+    icon: Newspaper,
+  },
+  {
+    name: "Industry Radar",
+    description: "Alerts on news across all tickers in your watchlist's sectors",
+    severity: "info",
+    scope: "watchlist",
+    conditions: [
+      {
+        signal_category: "News",
+        signal_id: "new_industry_news",
+        operator: ">",
+        value: 0,
+      },
+    ],
+    logic: "AND",
+    icon: Radio,
   },
 ];
 

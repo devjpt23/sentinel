@@ -23,6 +23,7 @@ from src.data.notification_db import (
     get_custom_alert_snapshot,
     save_custom_alert_snapshot,
     update_custom_alert_rule,
+    count_unnotified_news,
 )
 
 logger = logging.getLogger(__name__)
@@ -286,6 +287,58 @@ def _extract_per_share(data: Dict, scores: Dict, history: pd.DataFrame, params: 
     return float(val)
 
 
+# ─── News extractors ──────────────────────────────────────────
+
+def _extract_new_news(data: Dict, scores: Dict, history: pd.DataFrame, params: Dict) -> Optional[float]:
+    """Event signal: returns the count of undelivered news articles for this ticker.
+
+    Only activates during a news check tick (context in data['_news_check_context']).
+    Outside the news tick, always returns 0.0 to prevent false fires.
+
+    Returns the raw article count so that the hysteresis mechanism works correctly:
+    once articles are marked notified, the count drops to 0, the condition no longer
+    holds, and the rule can fire again on the next batch of news.
+    """
+    context = data.get("_news_check_context", {})
+    if not context.get("news_check_active"):
+        return 0.0
+    ticker = data.get("_ticker", "")
+    if not ticker:
+        return 0.0
+    return float(count_unnotified_news(ticker))
+
+
+def _extract_industry_news(data: Dict, scores: Dict, history: pd.DataFrame, params: Dict) -> Optional[float]:
+    """Event signal: returns count of unnotified news across sector peers.
+
+    Only activates during a news check tick (context in
+    ``data['_news_check_context']``). Loads the user's watchlist, groups
+    tickers by sector, and counts undelivered news for representative
+    tickers in those sectors — giving a sector-level view of news activity.
+
+    Users create a rule with any ticker (the ticker is ignored; the signal
+    evaluates by user sector membership instead).
+    """
+    context = data.get("_news_check_context", {})
+    if not context.get("news_check_active"):
+        return 0.0
+    user_id = context.get("_user_id")
+    if not user_id:
+        return 0.0
+
+    from src.notifications.checker import get_sector_peer_tickers
+
+    peers = get_sector_peer_tickers(user_id)
+    if not peers:
+        return 0.0
+
+    total = 0
+    for peer_ticker in peers:
+        total += count_unnotified_news(peer_ticker)
+
+    return float(total)
+
+
 # ─── Signal Catalog ───────────────────────────────────────────
 
 SIGNAL_CATALOG: Dict[str, Dict] = {
@@ -482,6 +535,27 @@ SIGNAL_CATALOG: Dict[str, Dict] = {
         "extractor": _extract_score,
         "params": {"score_key": "red_flag_count"},
     },
+    # ── News ───────────────────────────────────────
+    "new_news": {
+        "category": "News",
+        "name": "New News Article",
+        "unit": "articles",
+        "description": "New news articles detected for this ticker. Use > 0 to fire when any news appears.",
+        "operators": [">", ">=", "=="],
+        "requires_history": False,
+        "extractor": _extract_new_news,
+        "params": {},
+    },
+    "new_industry_news": {
+        "category": "News",
+        "name": "Industry News Activity",
+        "unit": "articles",
+        "description": "New news across all tickers in your watchlist's sectors. Fires when there's relevant industry news beyond the tickers you directly follow.",
+        "operators": [">", ">=", "=="],
+        "requires_history": False,
+        "extractor": _extract_industry_news,
+        "params": {},
+    },
 }
 
 # Standard operators — used when the operator doesn't need a previous value
@@ -520,7 +594,7 @@ def _build_merged_params(signal_def: Dict, condition_params: Dict) -> Dict:
 
 def get_signal_categories() -> List[str]:
     """Return distinct signal categories in display order."""
-    order = ["Price & Volume", "Technical", "Fundamental"]
+    order = ["Price & Volume", "Technical", "Fundamental", "News"]
     return [c for c in order if any(s["category"] == c for s in SIGNAL_CATALOG.values())]
 
 
@@ -926,6 +1000,13 @@ def _format_natural_body(
             return "Price touched upper Bollinger Band — overextended."
         else:
             return "Price touched lower Bollinger Band — potential bounce zone."
+
+    # News
+    if signal_id == "new_news":
+        return f"📰 New news article detected for this ticker ({current_value:.0f} new)."
+
+    if signal_id == "new_industry_news":
+        return f"🏭 Industry news activity detected ({current_value:.0f} new articles across sector peers)."
 
     # Fundamental / Generic fallback
     below = operator in ("<", "<=")

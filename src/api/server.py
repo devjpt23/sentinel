@@ -586,6 +586,27 @@ def api_register():
     if not user:
         return jsonify({"error": "username already taken"}), 409
     token = create_session(user["id"])
+
+    # Auto-create default "All News" alert rule for new users
+    try:
+        news_conditions = json.dumps([{
+            "signal_category": "news",
+            "signal_id": "new_news",
+            "operator": "==",
+            "value": True,
+        }])
+        create_custom_alert_rule(
+            user["id"],
+            name="All News",
+            scope="watchlist",
+            ticker=None,
+            conditions=news_conditions,
+            logic_operator="AND",
+            severity="info",
+        )
+    except Exception:
+        logger.warning("Failed to create default news rule for user %d", user["id"])
+
     return jsonify({"user": user, "session_token": token}), 201
 
 
