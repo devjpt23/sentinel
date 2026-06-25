@@ -27,7 +27,7 @@ web/                    # NEW: Next.js 15 frontend
 │   │                   # notifications, alerts, settings, admin,
 │   │                   # about, company/[ticker]
 │   ├── layout.tsx      # Root layout (dark theme)
-│   ── page.tsx        # Landing page
+│   ├── page.tsx        # Landing page
 ├── src/components/     # shadcn/ui primitives, charts, layout
 ├── src/lib/            # API client, auth server actions, utils
 ├── src/hooks/          # React Query hooks, debounce
@@ -40,7 +40,7 @@ deploy/                 # Deployment configs
 
 .github/workflows/      # CI/CD
 ├── deploy-backend.yml      # NEW: deploy Python to VPS
-── deploy-frontend.yml     # NEW: deploy Next.js to VPS/Vercel
+├── deploy-frontend.yml     # NEW: deploy Next.js to VPS/Vercel
 └── keep-alive.yml          # DEPRECATED: no more Streamlit
 ```
 
@@ -96,14 +96,26 @@ All data endpoints require `X-API-Key` header. Auth endpoints (`/api/auth/*`) us
 
 **Core endpoints added on this branch:**
 - `POST /api/user/register` (create account, returns session token)
-- `GET /api/data/<ticker>/health|intrinsic|risk|dcf|peers|financials|sentiment|institutional|supply-chain|filings|insider|ecosystem|price-growth`
+- `POST /api/user/login` (login, returns session token)
+- `POST|DELETE /api/auth/token|verify` (session management)
+- `GET /api/auth/me` (current user info from session)
+- `POST /api/auth/password-reset/request|confirm` (password reset flow)
+- `POST /api/user/<user_id>/link-telegram` (link Telegram account)
+- `GET /api/data/<ticker>/health|intrinsic|risk|dcf|peers|financials|sentiment|institutional|supply-chain|filings|insider|ecosystem|price-growth|price-history`
 - `GET /api/market/indices|news|macro|movers`
 - `GET /api/screener`, `GET /api/sectors`, `GET /api/sectors/search?q=`
 - `POST /api/notifications/<user_id>/mark-read|mark-all-read|dismiss`
+- `GET /api/notifications/<user_id>/unread-count`
+- `GET /api/notifications/stats`
 - `GET|POST|PUT|DELETE /api/alerts/<user_id>[/<rule_id>]`
+- `POST /api/alerts/<user_id>/<rule_id>/toggle`
 - `GET /api/alerts/signals` (18-signal catalog)
-- `DELETE /api/watchlist/<user_id>` (clear all)
-- `POST /api/admin/rescan` (trigger daemon to discover new users)
+- `POST|DELETE /api/push/subscribe|unsubscribe` (web push)
+- `GET /api/push/status`
+- `GET|POST|DELETE /api/watchlist/<user_id>[/<ticker>]`
+- `GET /api/watchlist/<user_id>/enriched` (cached, polls every 60s)
+- `GET /api/watchlist/<user_id>/count|has/<ticker>`
+- `POST /api/admin/rescan|clear-supply-chain-cache|run-check|reconciliation-tick`
 
 ## Key Decisions
 
