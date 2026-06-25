@@ -550,20 +550,158 @@ def _apply_finnhub_data(data: dict, ticker: str) -> dict:
 #  Main company data fetch
 # ═══════════════════════════════════════════════════════════════
 
+def _build_finnhub_fast_path(ticker: str) -> Dict[str, Any]:
+    """Build company data from Finnhub REST, skipping yfinance .info entirely.
+
+    For the watchlist fast path (skip_extras=True), replaces yfinance's
+    expensive .info call (2-5s) with Finnhub REST (100-200ms) for all
+    display fields. Still fetches yfinance financial statements for
+    scoring, which the enriched endpoint needs.
+
+    Finnhub fields are used when available; any missing fields are set to
+    None. The frontend handles null display fields gracefully via its
+    existing N/A fallback logic.
+
+    Rate limits are handled by FinnhubRestClient internally — if the
+    client is rate-limited, it returns None for all calls and this
+    function delegates to the normal yfinance path.
+    """
+    ticker = ticker.upper()
+    client = _get_finnhub_client()
+
+    # Fetch display data from Finnhub (fast, ~200ms total for all three)
+    quote = client.get_quote(ticker)
+    profile = client.get_profile(ticker)
+    financials = client.get_basic_financials(ticker)
+
+    # ── Company ──
+    company: Dict[str, Any] = {
+        "ticker": ticker,
+        "name": ticker,
+        "sector": None,
+        "industry": None,
+        "employees": None,
+        "description": None,
+        "website": None,
+        "country": None,
+    }
+    if profile:
+        for k in ("name", "sector", "industry"):
+            if profile.get(k) is not None:
+                company[k] = profile[k]
+        if profile.get("employees") is not None:
+            company["employees"] = profile["employees"]
+
+    # ── Market ──
+    market: Dict[str, Any] = {
+        "price": quote.get("c") if quote else None,
+        "previous_close": quote.get("pc") if quote else None,
+        "change": quote.get("d") if quote else None,
+        "change_pct": quote.get("dp") if quote else None,
+        "day_high": quote.get("h") if quote else None,
+        "day_low": quote.get("l") if quote else None,
+        "open": quote.get("o") if quote else None,
+        "market_cap": profile.get("marketCap") if profile else None,
+        "shares_outstanding": profile.get("shareOutstanding") if profile else None,
+        "beta": profile.get("beta") if profile else None,
+        "enterprise_value": None,
+        "float": None,
+        "52w_high": None,
+        "52w_low": None,
+        "52w_change_pct": None,
+        "avg_volume": None,
+    }
+
+    # ── Valuation ──
+    valuation: Dict[str, Any] = {
+        "pe_ttm": financials.get("pe") if financials else None,
+        "pb_ratio": financials.get("pb") if financials else None,
+        "pe_forward": None,
+        "peg_ratio": None,
+        "ps_ratio": None,
+        "ev_ebitda": None,
+        "ev_revenue": None,
+        "graham_number": None,
+    }
+
+    # ── Profitability (all yfinance-only) ──
+    profitability: Dict[str, Any] = {
+        k: None for k in (
+            "gross_margin", "operating_margin", "net_margin",
+            "roe", "roa", "roic",
+        )
+    }
+
+    # ── Per Share ──
+    per_share: Dict[str, Any] = {
+        "eps_ttm": financials.get("epsAnnual") if financials else None,
+        "eps_forward": None,
+        "revenue_per_share": None,
+        "book_value_per_share": None,
+        "dividend_yield": None,
+        "dividend_rate": None,
+        "payout_ratio": None,
+    }
+
+    # ── Growth (all yfinance-only) ──
+    growth: Dict[str, Any] = {
+        k: None for k in (
+            "revenue_growth_yoy", "earnings_growth_yoy",
+            "earnings_growth_quarterly",
+        )
+    }
+
+    # ── Health (all yfinance-only) ──
+    health: Dict[str, Any] = {
+        k: None for k in (
+            "debt_to_equity", "total_debt", "total_cash",
+            "current_ratio", "quick_ratio", "interest_coverage",
+            "fcf", "operating_cash_flow",
+        )
+    }
+
+    # ── Financial statements (needed for scoring on the detail page) ──
+    t = _get_ticker(ticker)
+    statements = _fetch_statements(t, ticker)
+
+    # ── No price history or news in fast-path mode ──
+    trends = _compute_trends(pd.DataFrame(), t)
+    news: list = []
+
+    return {
+        "company": company,
+        "market": market,
+        "valuation": valuation,
+        "profitability": profitability,
+        "per_share": per_share,
+        "growth": growth,
+        "health": health,
+        "statements": statements,
+        "trends": trends,
+        "news": news,
+    }
+
+
 def fetch_company_data(ticker: str, skip_extras: bool = False) -> Dict[str, Any]:
     """Fetch all fundamental data for a given ticker.
 
     Returns a dictionary with everything the dashboard needs.
     Returns None for any field if data is unavailable.
 
-    Uses _cached_ticker_info() for the .info dict (the heaviest API call).
-    Financial statements and history are not disk-cached (they're only
-    fetched on drill-down, not on every page load).
+    When skip_extras=True and Finnhub is configured, uses the fast path:
+    Finnhub REST for display fields (200ms) + yfinance financial statements
+    for scoring (~1s). Skips the expensive yfinance .info call (2-5s).
 
-    If the primary yfinance path fails, falls back to OpenBB as a
-    last-resort data source so the dashboard stays usable.
+    When skip_extras=False, uses full yfinance + Finnhub overlay.
+
+    Falls back to OpenBB as a last-resort on failure.
     """
     try:
+        if skip_extras:
+            client = _get_finnhub_client()
+            if client:
+                return _build_finnhub_fast_path(ticker)
+
         data = _fetch_company_data_yf(ticker, skip_extras=skip_extras)
         return _apply_finnhub_data(data, ticker)
     except Exception:
@@ -575,7 +713,7 @@ def fetch_company_data(ticker: str, skip_extras: bool = False) -> Dict[str, Any]
                 return obb_data
         except Exception:
             pass
-        raise  # re-raise the original yfinance error if everything failed
+        raise  # re-raise the original error if everything failed
 
 
 def _fetch_company_data_yf(ticker: str, skip_extras: bool = False) -> Dict[str, Any]:
