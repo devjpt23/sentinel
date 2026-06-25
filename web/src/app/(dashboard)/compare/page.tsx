@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { Suspense, useEffect, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { useCompareStore } from "@/stores/compare-store";
 import { useCompare } from "@/hooks/use-compare";
@@ -11,7 +11,7 @@ import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertTriangle, BarChart3 } from "lucide-react";
 
-export default function ComparePage() {
+function CompareContent() {
   const searchParams = useSearchParams();
   const tickers = useCompareStore((s) => s.tickers);
   const setTickers = useCompareStore((s) => s.setTickers);
@@ -119,5 +119,13 @@ export default function ComparePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ComparePage() {
+  return (
+    <Suspense fallback={<LoadingSpinner size="md" text="Loading compare..." />}>
+      <CompareContent />
+    </Suspense>
   );
 }
