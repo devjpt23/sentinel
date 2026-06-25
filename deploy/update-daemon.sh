@@ -39,8 +39,8 @@ chown -R sentinel:sentinel "/home/sentinel/.cache" 2>/dev/null || true
 # 1. Reinstall dependencies
 # ------------------------------------------------------------------
 log "Reinstalling dependencies"
-"$INSTALL_DIR/.venv/bin/pip" install --upgrade pip >/dev/null 2>&1
-"$INSTALL_DIR/.venv/bin/pip" install -e "$INSTALL_DIR" >/dev/null 2>&1
+"$INSTALL_DIR/.venv/bin/pip" install --upgrade pip 2>&1 || true
+"$INSTALL_DIR/.venv/bin/pip" install -e "$INSTALL_DIR" 2>&1
 
 # ------------------------------------------------------------------
 # 2. Restart daemon
