@@ -1607,6 +1607,94 @@ def api_push_test():
     return jsonify({"error": "test push delivery failed"}), 500
 
 
+# ─── Compare ──────────────────────────────────────────────────
+
+@app.route("/api/compare", methods=["POST"])
+def api_compare():
+    """Compare up to 10 tickers side-by-side across valuation, profitability,
+    health, risk, sentiment, and growth metrics.
+
+    Accepts JSON body: { "tickers": ["AAPL", "MSFT", ...] }
+    Returns per-ticker data with scores, growth, price history, and DCF.
+    """
+    body = request.get_json(silent=True)
+    if not body or "tickers" not in body:
+        return jsonify({"error": "tickers is required"}), 400
+
+    tickers = body["tickers"]
+    if not isinstance(tickers, list) or not tickers:
+        return jsonify({"error": "tickers must be a non-empty list"}), 400
+
+    tickers = [t.upper().strip() for t in tickers if t and t.strip()]
+
+    if not tickers:
+        return jsonify({"error": "at least one ticker is required"}), 400
+
+    if len(tickers) > 10:
+        return jsonify({"error": "maximum 10 tickers allowed"}), 400
+
+    results = []
+    for ticker in tickers:
+        try:
+            data, scores = _company_data(ticker, lite=True)
+            if data is None:
+                results.append({"ticker": ticker, "error": str(scores)})
+                continue
+
+            mkt = data.get("market", {})
+            price = mkt.get("price") or 0
+
+            # DCF valuation
+            dcf_result = compute_dcf(data) or {}
+            fair_value = dcf_result.get("fair_value_per_share")
+            upside = dcf_result.get("upside_pct")
+
+            # Price growth
+            try:
+                growth = fetch_price_growth(ticker) or {}
+            except Exception:
+                growth = {}
+
+            # Price history for overlay chart
+            try:
+                candles = fetch_price_history(ticker, period="1y") or []
+            except Exception:
+                candles = []
+            price_history = [
+                {"date": c["date"], "price": c["close"]}
+                for c in candles
+                if c.get("date") and c.get("close") is not None
+            ]
+
+            # Market cap and PE from cached yfinance info
+            info = _cached_ticker_info(ticker)
+
+            results.append({
+                "ticker": ticker,
+                "name": data.get("company", {}).get("name", ""),
+                "sector": data.get("company", {}).get("sector", ""),
+                "industry": data.get("company", {}).get("industry", ""),
+                "price": price,
+                "market_cap": info.get("marketCap") or 0,
+                "pe_ratio": info.get("trailingPE"),
+                "health_score": scores.get("health_score", 0),
+                "risk_score": scores.get("risk_score", 0),
+                "fscore": scores.get("fscore", 0),
+                "zscore": scores.get("zscore"),
+                "growth_3m": growth.get("3m") if growth else None,
+                "growth_6m": growth.get("6m") if growth else None,
+                "growth_12m": growth.get("12m") if growth else None,
+                "price_history": price_history,
+                "fair_value": fair_value,
+                "upside_pct": upside,
+            })
+        except Exception as e:
+            logger.exception("Compare failed for %s", ticker)
+            results.append({"ticker": ticker, "error": str(e)})
+
+    return jsonify({"tickers": results})
+
+
 # ─── Main ──────────────────────────────────────────────────────
 
 def main():

@@ -270,6 +270,33 @@ export interface SectorResult {
   healthScore: number;
 }
 
+// ─── Compare ────────────────────────────────────────────────────
+
+export interface CompareItem {
+  ticker: string;
+  name: string;
+  sector: string;
+  industry: string;
+  price: number;
+  market_cap: number;
+  pe_ratio: number | null;
+  health_score: number;
+  risk_score: number;
+  fscore: number;
+  zscore: number | null;
+  growth_3m: number | null;
+  growth_6m: number | null;
+  growth_12m: number | null;
+  price_history: Array<{ date: string; price: number }>;
+  fair_value: number | null;
+  upside_pct: number | null;
+  error?: string;
+}
+
+export interface CompareResponse {
+  tickers: CompareItem[];
+}
+
 // ─── Admin ─────────────────────────────────────────────────────
 
 export interface AdminUser {

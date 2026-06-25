@@ -133,6 +133,13 @@ export const api = {
 
   // Telegram
   getBotTokens: () => fetchApi<Record<string, unknown>>("/api/bot-tokens"),
+
+  // Compare
+  compareTickers: (tickers: string[]) =>
+    fetchApi<import("@/types/api").CompareResponse>("/api/compare", {
+      method: "POST",
+      body: JSON.stringify({ tickers }),
+    }),
 };
 
 export default api;

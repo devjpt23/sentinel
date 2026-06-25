@@ -20,11 +20,13 @@ import {
   Info,
   LogOut,
   Network,
+  GitCompare,
 } from "lucide-react";
 
 const dashboardItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/watchlist", label: "Watchlist", icon: ListTodo },
+  { href: "/compare", label: "Compare", icon: GitCompare },
   { href: "/screener", label: "Screener", icon: Search },
   { href: "/sectors", label: "Sectors", icon: BarChart3 },
   { href: "/sec-filings", label: "SEC Filings", icon: FileText },
