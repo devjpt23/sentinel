@@ -32,7 +32,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from src.data.finnhub_rest import FinnhubRestClient
+
 _logger = logging.getLogger(__name__)
+
+_finnhub_client: Optional[FinnhubRestClient] = None
 
 # ═══════════════════════════════════════════════════════════════
 #  Shared HTTP session — connection pooling, retry on 429/5xx
@@ -461,6 +465,88 @@ def _compute_52w_change(info: dict) -> Optional[float]:
 
 
 # ═══════════════════════════════════════════════════════════════
+#  Finnhub client — lazy singleton
+# ═══════════════════════════════════════════════════════════════
+
+
+def _get_finnhub_client() -> Optional[FinnhubRestClient]:
+    global _finnhub_client
+    if _finnhub_client is None:
+        _finnhub_client = FinnhubRestClient()
+    return _finnhub_client if _finnhub_client._api_key else None
+
+
+# ═══════════════════════════════════════════════════════════════
+#  Finnhub data overlay — faster display fields
+# ═══════════════════════════════════════════════════════════════
+
+
+def _apply_finnhub_data(data: dict, ticker: str) -> dict:
+    """Overwrite display fields in *data* with Finnhub values where available.
+
+    Only overwrites keys when Finnhub returns a non-null value. yfinance
+    values serve as fallback for any null fields.
+
+    Finnhub data is faster (~200ms vs yfinance's ~3s for .info). This runs
+    after the primary yfinance fetch and replaces display fields so the
+    dashboard gets fresher data without waiting for yfinance.
+    """
+    client = _get_finnhub_client()
+    if not client:
+        return data
+
+    quote = client.get_quote(ticker)
+    if quote:
+        field_map = {
+            "price": "c",
+            "previous_close": "pc",
+            "change": "d",
+            "change_pct": "dp",
+            "day_high": "h",
+            "day_low": "l",
+            "open": "o",
+        }
+        for dest_key, finnhub_key in field_map.items():
+            if quote.get(finnhub_key) is not None:
+                data["market"][dest_key] = quote[finnhub_key]
+
+    profile = client.get_profile(ticker)
+    if profile:
+        for dest_key, finnhub_key in {
+            "name": "name",
+            "sector": "sector",
+            "industry": "industry",
+        }.items():
+            if profile.get(finnhub_key) is not None:
+                data["company"][dest_key] = profile[finnhub_key]
+        for dest_key, finnhub_key in {
+            "employees": "employees",
+            "beta": "beta",
+            "market_cap": "marketCap",
+            "shares_outstanding": "shareOutstanding",
+        }.items():
+            if profile.get(finnhub_key) is not None:
+                data["market"][dest_key] = profile[finnhub_key]
+
+    financials = client.get_basic_financials(ticker)
+    if financials:
+        field_map = {
+            "pe_ttm": "pe",
+            "eps_ttm": "epsAnnual",
+            "pb_ratio": "pb",
+        }
+        for dest_key, finnhub_key in field_map.items():
+            if financials.get(finnhub_key) is not None:
+                data["valuation"][dest_key] = financials[finnhub_key]
+
+        # Also update per_share.eps_ttm if Finnhub has it
+        if financials.get("epsAnnual") is not None:
+            data["per_share"]["eps_ttm"] = financials["epsAnnual"]
+
+    return data
+
+
+# ═══════════════════════════════════════════════════════════════
 #  Main company data fetch
 # ═══════════════════════════════════════════════════════════════
 
@@ -478,7 +564,8 @@ def fetch_company_data(ticker: str, skip_extras: bool = False) -> Dict[str, Any]
     last-resort data source so the dashboard stays usable.
     """
     try:
-        return _fetch_company_data_yf(ticker, skip_extras=skip_extras)
+        data = _fetch_company_data_yf(ticker, skip_extras=skip_extras)
+        return _apply_finnhub_data(data, ticker)
     except Exception:
         # Last-resort: try OpenBB before giving up entirely
         try:
