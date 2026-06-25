@@ -34,6 +34,7 @@ from src.notifications.checker import (
     check_all_tickers_for_user,
     deliver_notifications,
     check_ticker_news,
+    evaluate_price_alert,
 )
 from src.notifications.custom_alerts import evaluate_custom_alerts
 from src.notifications.price_feed import FinnhubPriceFeed
@@ -154,27 +155,19 @@ def price_tick(feed: Optional[FinnhubPriceFeed] = None) -> None:
         ticker_rules = rules_by_ticker[ticker]
         price = ev["price"]
 
-        # Build minimal data dict — just enough for _extract_price
-        data = {"market": {"price": price}}
-
         # Group rules by user_id
         by_user: Dict[int, List[Dict]] = {}
         for rule in ticker_rules:
             by_user.setdefault(rule["user_id"], []).append(rule)
 
-        for user_id, user_rules in by_user.items():
+        for user_id in by_user:
             try:
-                notifications = evaluate_custom_alerts(
+                notifications = evaluate_price_alert(
                     user_id,
                     ticker,
-                    data,
-                    {},
-                    history_override=pd.DataFrame(),
+                    price,
                 )
                 if notifications:
-                    # Override current_price since data dict is minimal
-                    for n in notifications:
-                        n["current_price"] = price
                     delivered = deliver_notifications(
                         user_id, {ticker: notifications}
                     )

@@ -64,8 +64,7 @@ class FinnhubPriceFeed:
         self._stop_requested: bool = False
         self._is_429: bool = False
         # Per-connection-id tracking for first-occurrence-only logging
-        self._conn_id: int = 0
-        self._non_trade_logged: Dict[int, Dict[str, bool]] = {}
+        self._non_trade_logged: Dict[str, bool] = {}
 
     # ─── Public API ─────────────────────────────────────────────────
 
@@ -217,41 +216,35 @@ class FinnhubPriceFeed:
             tickers: Set of ticker symbols to subscribe to (case-insensitive,
                      will be uppercased).
         """
+        # Check for empty tickers in input (log warning)
+        has_empty = any(not t or not t.strip() for t in tickers)
+        if has_empty:
+            logger.warning("Empty ticker in subscription list — skipping")
+
         tickers = {t.upper().strip() for t in tickers if t and t.strip()}
 
-        # Filter empty tickers
-        valid: Set[str] = set()
-        for t in tickers:
-            ts = t.strip()
-            if ts:
-                valid.add(ts)
-            else:
-                logger.warning(
-                    "Empty ticker in subscription list — skipping"
-                )
-
         # Cap at Finnhub free tier limit
-        if len(valid) > _FINNHUB_FREE_TICKER_CAP:
+        if len(tickers) > _FINNHUB_FREE_TICKER_CAP:
             logger.warning(
                 "Active tickers (%d) exceed Finnhub free cap (%d). "
                 "Subscribing first %d.",
-                len(valid),
+                len(tickers),
                 _FINNHUB_FREE_TICKER_CAP,
                 _FINNHUB_FREE_TICKER_CAP,
             )
-            valid = set(sorted(valid)[:_FINNHUB_FREE_TICKER_CAP])
+            tickers = set(sorted(tickers)[:_FINNHUB_FREE_TICKER_CAP])
 
         with self._lock:
             old_desired = self._desired_tickers
-            self._desired_tickers = valid
+            self._desired_tickers = tickers
 
             # If connected, apply diffs via WebSocket
             if self._ws and self._state in (
                 _STATE_CONNECTED,
                 _STATE_SUBSCRIBED,
             ):
-                to_add = valid - self._subscribed_tickers
-                to_remove = self._subscribed_tickers - valid
+                to_add = tickers - self._subscribed_tickers
+                to_remove = self._subscribed_tickers - tickers
 
                 if to_remove:
                     self._send_unsubscribe(to_remove)
@@ -288,9 +281,8 @@ class FinnhubPriceFeed:
             if self._backoff > 0:
                 with self._lock:
                     self._state = _STATE_BACKOFF
-                logger.info(
-                    "Finnhub backoff at max (%ds), reconnecting in %ds",
-                    _BACKOFF_MAX,
+                logger.debug(
+                    "Finnhub reconnecting in %ds (backoff)",
                     self._backoff,
                 )
                 if self._wait_with_stop(self._backoff):
@@ -309,23 +301,17 @@ class FinnhubPriceFeed:
                     self._state = _STATE_CONNECTING
 
             url = _FINNHUB_WS_URL.format(token=self._api_key)
-            self._conn_id += 1
-            conn_id = self._conn_id
 
             # Reset per-connection logging for non-trade messages
-            self._non_trade_logged[conn_id] = {}
+            self._non_trade_logged.clear()
 
             ws = websocket.WebSocketApp(
                 url,
-                on_open=lambda ws: self._on_open(ws, conn_id),
-                on_message=lambda ws, msg: self._on_message(
-                    ws, msg, conn_id
-                ),
-                on_error=lambda ws, err: self._on_error(
-                    ws, err, conn_id
-                ),
+                on_open=lambda ws: self._on_open(ws),
+                on_message=lambda ws, msg: self._on_message(ws, msg),
+                on_error=lambda ws, err: self._on_error(ws, err),
                 on_close=lambda ws, close_status, close_msg: self._on_close(
-                    ws, close_status, close_msg, conn_id
+                    ws, close_status, close_msg
                 ),
             )
             with self._lock:
@@ -339,7 +325,7 @@ class FinnhubPriceFeed:
                 if self._state == _STATE_STOPPED:
                     break
 
-    def _on_open(self, ws, conn_id: int) -> None:
+    def _on_open(self, ws) -> None:
         """WebSocket connection established.
 
         Subscribes to all desired tickers, sets state to SUBSCRIBED,
@@ -368,7 +354,7 @@ class FinnhubPriceFeed:
 
             self._stable_since = time.time()
 
-    def _on_message(self, ws, message: str, conn_id: int) -> None:
+    def _on_message(self, ws, message: str) -> None:
         """Process an incoming WebSocket message from Finnhub.
 
         Trade messages are parsed and enqueued. Non-trade messages (ping,
@@ -392,13 +378,12 @@ class FinnhubPriceFeed:
         msg_type = msg.get("type")
         if msg_type != "trade":
             # Log first non-trade message per connection, then stfu
-            conn_logged = self._non_trade_logged.get(conn_id, {})
             msg_name = msg_type or "unknown"
-            if not conn_logged.get(msg_name):
+            if not self._non_trade_logged.get(msg_name):
                 logger.debug(
                     "Non-trade message from Finnhub: type=%s", msg_name
                 )
-                self._non_trade_logged[conn_id][msg_name] = True
+                self._non_trade_logged[msg_name] = True
             return
 
         # Process trade data
@@ -486,7 +471,7 @@ class FinnhubPriceFeed:
                     self._queue_full_warned_at = now
 
     def _on_error(
-        self, ws, error: Exception, conn_id: int
+        self, ws, error: Exception
     ) -> None:
         """Handle WebSocket error.
 
@@ -525,14 +510,12 @@ class FinnhubPriceFeed:
         ws,
         close_status,
         close_msg: Optional[str],
-        conn_id: int,
     ) -> None:
         """WebSocket connection closed.
 
         Updates state to DISCONNECTED. Applies exponential backoff
-        (doubles, cap at 30s) UNLESS the connection was stable for
-        120+ seconds, in which case backoff resets to 0 for a fresh
-        start. Handles 429 backoff override without doubling.
+        (doubles, cap at 30s). Handles 429 backoff override without
+        doubling. Backoff stability reset is handled by drain_events().
         """
         with self._lock:
             if self._state == _STATE_STOPPED:
@@ -543,16 +526,6 @@ class FinnhubPriceFeed:
             if self._is_429:
                 pass  # backoff stays at 60
             else:
-                # Check for backoff reset (stable for 120s+ before disconnect)
-                if self._stable_since is not None:
-                    stable_duration = time.time() - self._stable_since
-                    if stable_duration >= _BACKOFF_RESET_AFTER:
-                        self._backoff = 0
-                        logger.debug(
-                            "Finnhub backoff reset (%ds stable)",
-                            stable_duration,
-                        )
-
                 # Binary exponential backoff
                 if self._backoff == 0:
                     self._backoff = _BACKOFF_START
@@ -563,11 +536,6 @@ class FinnhubPriceFeed:
 
             self._stable_since = None
 
-        msg = close_msg or ""
-        log_msg = (
-            f"Finnhub WebSocket disconnected: {msg}. Backoff: "
-            f"{self._backoff}s"
-        )
         if close_msg:
             logger.warning(
                 "Finnhub WebSocket disconnected: %s. Backoff: %ds",
