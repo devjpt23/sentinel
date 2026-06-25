@@ -7,6 +7,11 @@ interface WatchlistState {
   removeTicker: (ticker: string) => void;
   clearWatchlist: () => void;
   hasTicker: (ticker: string) => boolean;
+
+  // Phase 4: compare selection
+  selectedForCompare: string[];
+  toggleCompareSelection: (ticker: string) => void;
+  clearCompareSelection: () => void;
 }
 
 export const useWatchlistStore = create<WatchlistState>()(
@@ -30,9 +35,25 @@ export const useWatchlistStore = create<WatchlistState>()(
       clearWatchlist: () => set({ tickers: [] }),
       hasTicker: (ticker: string) =>
         get().tickers.includes(ticker.toUpperCase()),
+
+      // Phase 4: compare selection
+      selectedForCompare: [],
+      toggleCompareSelection: (ticker: string) => {
+        const upper = ticker.toUpperCase();
+        set((state) => ({
+          selectedForCompare: state.selectedForCompare.includes(upper)
+            ? state.selectedForCompare.filter((t) => t !== upper)
+            : [...state.selectedForCompare, upper],
+        }));
+      },
+      clearCompareSelection: () => set({ selectedForCompare: [] }),
     }),
     {
       name: "sentinel-watchlist",
+      partialize: (state) => ({
+        tickers: state.tickers,
+        selectedForCompare: state.selectedForCompare,
+      }),
     }
   )
 );

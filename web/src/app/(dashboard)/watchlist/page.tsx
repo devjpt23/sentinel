@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import Link from "next/link";
 import {
   useEnrichedWatchlist,
   useAddToWatchlist,
@@ -9,39 +8,14 @@ import {
   useUser,
 } from "@/hooks/use-watchlist";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableHeader,
-  TableBody,
-  TableHead,
-  TableRow,
-  TableCell,
-} from "@/components/ui/table";
+import { WatchlistTable } from "@/components/watchlist/WatchlistTable";
 import { PeerScatter } from "@/components/charts/PeerScatter";
 import { SectorPie } from "@/components/charts/SectorPie";
 import {
-  ScoreBadge,
-  VerdictBadge,
-  RiskBadge,
-} from "@/components/shared";
-import {
-  formatPrice,
-  formatPct,
-  getHealthColor,
-  getHealthBg,
-  getRiskColor,
-  cn,
-} from "@/lib/utils";
-import {
   Plus,
-  Trash2,
-  ArrowUpDown,
   Search,
-  ExternalLink,
   BarChart3,
   PieChart,
 } from "lucide-react";
@@ -176,103 +150,11 @@ export default function WatchlistPage() {
       {/* Data Table */}
       <Card>
         <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-24">
-                  <SortableHeader label="Ticker" sortKey="ticker" currentSort={sortKey} currentDir={sortDir} onClick={handleSort} />
-                </TableHead>
-                <TableHead className="w-28 text-right">Price</TableHead>
-                <TableHead className="w-24 text-right">
-                  <SortableHeader label="Change" sortKey="change_pct" currentSort={sortKey} currentDir={sortDir} onClick={handleSort} />
-                </TableHead>
-                <TableHead className="w-28">
-                  <SortableHeader label="Health" sortKey="healthScore" currentSort={sortKey} currentDir={sortDir} onClick={handleSort} />
-                </TableHead>
-                <TableHead className="w-24">Verdict</TableHead>
-                <TableHead className="w-24">Risk</TableHead>
-                <TableHead className="w-20 text-right">
-                  <SortableHeader label="3M" sortKey="growth3m" currentSort={sortKey} currentDir={sortDir} onClick={handleSort} />
-                </TableHead>
-                <TableHead className="w-20 text-right">
-                  <SortableHeader label="6M" sortKey="growth6m" currentSort={sortKey} currentDir={sortDir} onClick={handleSort} />
-                </TableHead>
-                <TableHead className="w-20 text-right">
-                  <SortableHeader label="12M" sortKey="growth12m" currentSort={sortKey} currentDir={sortDir} onClick={handleSort} />
-                </TableHead>
-                <TableHead className="w-16"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {enrichedLoading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <TableRow key={i}>
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((j) => (
-                      <TableCell key={j}>
-                        <Skeleton className="h-4 w-16" />
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : filtered.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={10} className="text-center py-8 text-[#6b7f8e]">
-                    No watchlist items found.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filtered.map((item) => (
-                  <TableRow
-                    key={item.ticker}
-                    className="cursor-pointer"
-                    onClick={() => (window.location.href = `/company/${item.ticker}`)}
-                  >
-                    <TableCell className="font-semibold">
-                      <Link
-                        href={`/company/${item.ticker}`}
-                        className="flex items-center gap-1 text-[#84cc16] hover:text-[#65a30d] transition-colors"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {item.ticker}
-                        <ExternalLink className="h-3 w-3" />
-                      </Link>
-                    </TableCell>
-                    <TableCell className="text-right font-mono">
-                      {formatPrice(item.price)}
-                    </TableCell>
-                    <TableCell className={`text-right font-mono ${item.change_pct >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                      {formatPct(item.change_pct)}
-                    </TableCell>
-                    <TableCell>
-                      <ScoreBadge score={item.healthScore} size="sm" />
-                    </TableCell>
-                    <TableCell>
-                      <VerdictBadge verdict={item.verdict} />
-                    </TableCell>
-                    <TableCell>
-                      <RiskBadge label={item.riskLabel} />
-                    </TableCell>
-                    <GrowthCell value={item.growth3m} />
-                    <GrowthCell value={item.growth6m} />
-                    <GrowthCell value={item.growth12m} />
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleRemove(item.ticker);
-                        }}
-                        className="h-7 w-7 text-zinc-500 hover:text-red-400"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
+          <WatchlistTable
+            items={filtered}
+            isLoading={enrichedLoading}
+            onRemove={handleRemove}
+          />
         </CardContent>
       </Card>
 
@@ -305,28 +187,5 @@ export default function WatchlistPage() {
         </Card>
       </div>
     </div>
-  );
-}
-
-function SortableHeader({ label, sortKey, currentSort, currentDir, onClick }: {
-  label: string; sortKey: SortKey; currentSort: SortKey; currentDir: SortDir; onClick: (key: SortKey) => void;
-}) {
-  return (
-    <button
-      onClick={() => onClick(sortKey)}
-      className="flex items-center gap-1 text-[#6b7f8e] hover:text-[#c8d8e4] transition-colors"
-    >
-      {label}
-      <ArrowUpDown className={cn("h-3 w-3", currentSort === sortKey ? "text-[#84cc16]" : "text-[#3a5570]")} />
-    </button>
-  );
-}
-
-function GrowthCell({ value }: { value: number | null }) {
-  if (value === null) return <TableCell className="text-right text-zinc-600">N/A</TableCell>;
-  return (
-    <TableCell className={`text-right font-mono ${value >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-      {formatPct(value)}
-    </TableCell>
   );
 }

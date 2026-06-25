@@ -1,15 +1,20 @@
 "use client";
 
-import { Suspense, useEffect, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useCompareStore } from "@/stores/compare-store";
 import { useCompare } from "@/hooks/use-compare";
 import { CompareHeader } from "@/components/compare/CompareHeader";
 import { ComparePriceOverlay } from "@/components/compare/ComparePriceOverlay";
 import { CompareTable } from "@/components/compare/CompareTable";
+import { CompareRadar } from "@/components/charts/CompareRadar";
+import { CompareScatter } from "@/components/charts/CompareScatter";
+import { ReturnsHeatmap } from "@/components/charts/ReturnsHeatmap";
 import { LoadingSpinner } from "@/components/shared/loading-spinner";
 import { Card, CardContent } from "@/components/ui/card";
 import { AlertTriangle, BarChart3 } from "lucide-react";
+
+type ViewMode = "chart" | "table" | "radar" | "scatter" | "heatmap";
 
 function CompareContent() {
   const searchParams = useSearchParams();
@@ -37,6 +42,9 @@ function CompareContent() {
   // Clear state
   const hasTickers = tickers.length > 0;
   const enoughTickers = tickers.length >= 2;
+
+  // View selector
+  const [view, setView] = useState<ViewMode>("chart");
 
   return (
     <div className="space-y-6">
@@ -105,8 +113,36 @@ function CompareContent() {
       {/* Results */}
       {!isLoading && !error && enoughTickers && validItems.length > 0 && (
         <div className="space-y-6">
-          <ComparePriceOverlay items={validItems} isLoading={false} />
-          <CompareTable items={validItems} isLoading={false} />
+          {/* View selector tabs */}
+          <div className="flex gap-1 border-b border-[#1e2d3a] mb-4">
+            {(["chart", "table", "radar", "scatter", "heatmap"] as const).map((v) => (
+              <button key={v} onClick={() => setView(v)}
+                className={`px-3 py-2 text-xs font-medium capitalize transition-colors ${
+                  v === view
+                    ? "text-white border-b-2 border-[#84cc16]"
+                    : "text-[#6b7f8e] hover:text-white"
+                }`}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+
+          {view === "chart" && (
+            <ComparePriceOverlay items={validItems} isLoading={false} />
+          )}
+          {view === "table" && (
+            <CompareTable items={validItems} isLoading={false} />
+          )}
+          {view === "radar" && (
+            <CompareRadar items={validItems} />
+          )}
+          {view === "scatter" && (
+            <CompareScatter items={validItems} />
+          )}
+          {view === "heatmap" && (
+            <ReturnsHeatmap items={validItems} />
+          )}
         </div>
       )}
 

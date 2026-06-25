@@ -33,9 +33,15 @@ import {
   ExternalLink,
 } from "lucide-react";
 
-// Dynamically import the globe component (created by another agent)
+// Dynamically import the globe component
 const SupplyChainGlobe = dynamic(
   () => import("@/components/charts/SupplyChainGlobe"),
+  { ssr: false, loading: () => <GlobeSkeleton /> },
+);
+
+// Dynamically import the map component (uses react-simple-maps which needs DOM)
+const SupplyChainMap = dynamic(
+  () => import("@/components/supply-chain/SupplyChainMap").then((m) => ({ default: m.SupplyChainMap })),
   { ssr: false, loading: () => <GlobeSkeleton /> },
 );
 
@@ -255,7 +261,7 @@ export default function SupplyChainPage() {
           </div>
         </div>
         <div className="flex gap-1 border-b border-[#1e2d3a]">
-          {["Globe", "Explorer", "Investability", "Risk"].map((t) => (
+          {["Globe", "Map", "Explorer", "Investability", "Risk"].map((t) => (
             <Skeleton key={t} className="h-8 w-24" />
           ))}
         </div>
@@ -365,6 +371,7 @@ export default function SupplyChainPage() {
       <Tabs
         tabs={[
           { id: "globe", label: "Globe" },
+          { id: "map", label: "Map" },
           { id: "explorer", label: "Explorer" },
           { id: "investability", label: "Investability" },
           { id: "risk", label: "Risk Table" },
@@ -382,6 +389,9 @@ export default function SupplyChainPage() {
           }}
         />
       )}
+
+      {/* Tab: Map */}
+      {activeTab === "map" && <SupplyChainMap data={sortedCountryExposure} />}
 
       {/* Tab: Explorer */}
       {activeTab === "explorer" && (

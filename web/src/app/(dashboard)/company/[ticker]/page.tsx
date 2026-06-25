@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -8,7 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import type { UTCTimestamp } from "lightweight-charts";
 import { ScoreBadge } from "@/components/shared/ScoreBadge";
 import { VerdictBadge } from "@/components/shared/VerdictBadge";
@@ -16,9 +24,10 @@ import { RiskBadge } from "@/components/shared/RiskBadge";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { useHealth, useIntrinsic, useRisk, useFinancials, useDcf, usePriceHistory, useSentiment, useInstitutional, useInsider, usePriceGrowth, useMacro, useIndices } from "@/hooks/use-company-data";
 import { OverviewCard } from "@/components/company/OverviewCard";
+import { DcfHeatmap } from "@/components/company/DcfHeatmap";
 import {
   formatCurrency, formatPercent, formatPrice, formatPct, formatRelativeTime,
-  getHealthBg, getZScoreZoneColor, getSensitivityCellColor,
+  getHealthBg, getZScoreZoneColor,
 } from "@/lib/utils";
 import {
   ArrowLeft, Bell, TrendingUp, TrendingDown, AlertTriangle, Shield,
@@ -84,6 +93,32 @@ export default function CompanyDeepDivePage() {
     onSuccess: () => { toast.success("Alert created"); },
   });
 
+  // Compare dialog state
+  const [compareInput, setCompareInput] = useState("");
+  const [showCompareDialog, setShowCompareDialog] = useState(false);
+  const compareInputRef = useRef<HTMLInputElement>(null);
+
+  const handleComparePeers = useCallback(() => {
+    api
+      .get<{ peers: string[] }>(`/api/data/${ticker}/peers`)
+      .then((data) => {
+        const peers = (data.peers ?? []).slice(0, 6).join(",");
+        router.push(`/compare?tickers=${ticker},${peers}`);
+      })
+      .catch(() => {
+        router.push(`/compare?tickers=${ticker}`);
+      });
+  }, [ticker, router]);
+
+  const handleCompareWith = () => {
+    const other = compareInput.trim().toUpperCase();
+    if (other) {
+      setShowCompareDialog(false);
+      setCompareInput("");
+      router.push(`/compare?tickers=${ticker},${other}`);
+    }
+  };
+
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (alertMenuRef.current && !alertMenuRef.current.contains(event.target as Node)) {
@@ -132,6 +167,44 @@ export default function CompanyDeepDivePage() {
             {hName || "Company name"} • {hSector || "Sector"}
           </p>
         </div>
+        {/* Compare buttons */}
+        <button
+          onClick={handleComparePeers}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1e2d3a] text-xs text-[#6b7f8e] hover:text-[#84cc16] hover:border-[#84cc16]/30 transition-colors"
+        >
+          <BarChart3 className="h-3.5 w-3.5" />
+          Compare to Peers
+        </button>
+        <Dialog open={showCompareDialog} onOpenChange={setShowCompareDialog}>
+          <DialogTrigger asChild>
+            <button
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1e2d3a] text-xs text-[#6b7f8e] hover:text-[#84cc16] hover:border-[#84cc16]/30 transition-colors"
+            >
+              <BarChart3 className="h-3.5 w-3.5" />
+              Compare with...
+            </button>
+          </DialogTrigger>
+          <DialogContent className="sm:max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Compare {ticker} with...</DialogTitle>
+            </DialogHeader>
+            <div className="flex items-center gap-2 pt-2">
+              <Input
+                ref={compareInputRef}
+                placeholder="Enter ticker (e.g., MSFT)"
+                value={compareInput}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setCompareInput(e.target.value.toUpperCase())}
+                onKeyDown={(e: React.KeyboardEvent<HTMLInputElement>) => {
+                  if (e.key === "Enter") handleCompareWith();
+                }}
+                className="flex-1"
+              />
+              <Button onClick={handleCompareWith} disabled={!compareInput.trim()}>
+                Compare
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
         <Link
           href={`/supply-chain/${ticker}`}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1e2d3a] text-xs text-[#6b7f8e] hover:text-[#84cc16] hover:border-[#84cc16]/30 transition-colors"
@@ -725,43 +798,7 @@ function ValuationTab({
           </Card>
 
           {/* Sensitivity Heatmap */}
-          {sensitivity && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Sensitivity Analysis — Upside %</CardTitle>
-                <CardDescription>How upside changes with different WACC and growth assumptions</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="inline-block">
-                  <table className="text-xs">
-                    <thead>
-                      <tr>
-                        <th className="p-2 text-[#6b7f8e]">Growth \ WACC</th>
-                        {sensitivity.wacc_range?.map((w: number, i: number) => (
-                          <th key={i} className="p-2 text-[#6b7f8e] font-mono">{w.toFixed(1)}%</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sensitivity.growth_range?.map((g: number, rowI: number) => (
-                        <tr key={rowI}>
-                          <td className="p-2 text-[#6b7f8e] font-mono">{g.toFixed(1)}%</td>
-                          {sensitivity.matrix?.[rowI]?.map((val: number | null, colI: number) => (
-                            <td
-                              key={colI}
-                              className={`p-2 font-mono text-center rounded ${getSensitivityCellColor(val)}`}
-                            >
-                              {val !== null ? `${val >= 0 ? "+" : ""}${val.toFixed(1)}%` : "—"}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+          {sensitivity && <DcfHeatmap sensitivity={sensitivity} />}
 
           {/* Intrinsic Worth Cards */}
           {intrinsicData && !intrinsicLoading && (
