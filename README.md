@@ -68,7 +68,7 @@ This branch (`migrate-to-vercel`) runs the current architecture: a Flask API on 
 - **Watchlist** -- Saved tickers with live health scores, auto-refreshing price marquee
 - **Sector Browser** -- Discover stocks by sector with market cap and health filtering
 - **Screener** -- Multi-criteria stock screening across financial metrics
-- **Notifications** -- Browser push and in-app notification history
+- **Notifications** -- Browser push, Telegram, and in-app notification history ([mobile setup guide](docs/mobile-user-guide.md))
 - **Custom Alerts** -- Rule-based alerts triggered by scoring thresholds, price moves, or volume
 
 ### Market Data
