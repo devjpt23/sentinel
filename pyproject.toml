@@ -10,7 +10,6 @@ dependencies = [
     "plotly>=5.17.0",
     "pandas>=2.0.0",
     "numpy>=1.24.0",
-    "fpdf2>=2.8.7",
     "lxml>=6.1.1",
     "apscheduler>=3.10.0",
     "sqlalchemy>=2.0.0",

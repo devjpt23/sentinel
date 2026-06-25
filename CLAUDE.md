@@ -139,7 +139,6 @@ The frontend polls every 60s (TanStack React Query `refetchInterval`). Without c
 
 ## Known Gaps
 
-- PDF export not yet ported (was fpdf2 in Python — needs @react-pdf/renderer or jsPDF)
 - Supply chain choropleth map needs D3/react-force-graph (was Plotly)
 - DCF sensitivity heatmap uses CSS grid, not a chart library
 - Email notifications not yet implemented (Telegram only for now)

@@ -368,7 +368,6 @@ CI/CD via GitHub Actions: pushes to `main` or `migrate-to-vercel` that touch `we
 
 ## Known Gaps
 
-- PDF export (was `fpdf2` in Python -- pending `@react-pdf/renderer` or jsPDF port)
 - Supply chain choropleth map (was Plotly -- pending D3 or force-graph port)
 - Email notifications (Telegram and browser push only for now)
 
