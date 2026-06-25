@@ -174,6 +174,8 @@ Available gstack skills: `/office-hours`, `/plan-ceo-review`, `/plan-eng-review`
 
 ## Skill routing
 
+Never use codex for outside voice.
+
 When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
 
 Key routing rules:
