@@ -9,6 +9,7 @@ export function useWatchlist(userId: number) {
       const data = await api.getWatchlist(userId);
       return data.tickers ?? [];
     },
+    enabled: !!userId,
     refetchInterval: 30_000,
   });
 }
@@ -36,6 +37,7 @@ export function useEnrichedWatchlist(userId: number) {
       const data = await api.getEnrichedWatchlist(userId);
       return (data.items ?? []).map(cleanItem);
     },
+    enabled: !!userId,
     refetchInterval: 60_000, // slower, more expensive endpoint
   });
 }
@@ -72,6 +74,7 @@ export function usePreferences(userId: number) {
   return useQuery({
     queryKey: ["preferences", userId],
     queryFn: () => api.getPreferences(userId),
+    enabled: !!userId,
     staleTime: 60_000,
   });
 }

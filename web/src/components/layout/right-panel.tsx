@@ -18,6 +18,7 @@ function NotificationsSection({ userId }: { userId: number }) {
   const { data, isLoading } = useQuery({
     queryKey: ["notifications", userId, 5],
     queryFn: () => api.get<Record<string, unknown>>(`/api/notifications/${userId}`, { params: { limit: 5 } }),
+    enabled: !!userId,
     retry: false,
   });
 
