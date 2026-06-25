@@ -9,12 +9,13 @@ Usage:
     python3 -m src.notifications.daemon
 """
 
+import os
 import sys
 import threading
 import time
 import logging
 from datetime import datetime
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
 
@@ -35,6 +36,7 @@ from src.notifications.checker import (
     check_ticker_news,
 )
 from src.notifications.custom_alerts import evaluate_custom_alerts
+from src.notifications.price_feed import FinnhubPriceFeed
 from src.notifications.telegram_bot import poll_user_bot
 
 logger = logging.getLogger(__name__)
@@ -113,6 +115,98 @@ def check_tick() -> None:
 
 
 _fetcher = TickerDataFetcher(max_workers=5)
+
+# Price feed instance (initialized in main(), None if no API key)
+_price_feed: Optional[FinnhubPriceFeed] = None
+_last_sub_refresh = 0.0
+_SUB_REFRESH_INTERVAL = 300  # 5 minutes
+
+
+def price_tick(feed: Optional[FinnhubPriceFeed] = None) -> None:
+    """Drain price feed events and evaluate price-based alert rules.
+
+    Called every main-loop iteration (1s). Does NOT need its own timer —
+    called directly since events are rare and the check is cheap.
+
+    Args:
+        feed: The price feed instance, or None (no-op).
+    """
+    if feed is None:
+        return
+
+    events = feed.drain_events()
+    if not events:
+        return
+
+    # 1. Deduplicate: keep only the latest price per ticker per tick
+    latest: Dict[str, Dict] = {}
+    for ev in events:
+        ticker = ev["ticker"].upper()
+        latest[ticker] = ev  # last wins (queue is FIFO, so later = newer)
+
+    # 2. For each ticker with a new price, evaluate alert rules
+    rules_by_ticker = get_all_active_alerts_grouped_by_ticker()
+
+    for ticker, ev in latest.items():
+        if ticker not in rules_by_ticker:
+            continue
+
+        ticker_rules = rules_by_ticker[ticker]
+        price = ev["price"]
+
+        # Build minimal data dict — just enough for _extract_price
+        data = {"market": {"price": price}}
+
+        # Group rules by user_id
+        by_user: Dict[int, List[Dict]] = {}
+        for rule in ticker_rules:
+            by_user.setdefault(rule["user_id"], []).append(rule)
+
+        for user_id, user_rules in by_user.items():
+            try:
+                notifications = evaluate_custom_alerts(
+                    user_id,
+                    ticker,
+                    data,
+                    {},
+                    history_override=pd.DataFrame(),
+                )
+                if notifications:
+                    # Override current_price since data dict is minimal
+                    for n in notifications:
+                        n["current_price"] = price
+                    delivered = deliver_notifications(
+                        user_id, {ticker: notifications}
+                    )
+                    if delivered:
+                        logger.info(
+                            "Price feed: user %d, %s @ $%.2f — "
+                            "%d delivered",
+                            user_id,
+                            ticker,
+                            price,
+                            delivered,
+                        )
+            except Exception:
+                logger.exception(
+                    "price_tick failed for user %d, %s",
+                    user_id,
+                    ticker,
+                )
+
+
+def _refresh_price_feed_subscriptions() -> None:
+    """Query DB for tickers with active alert rules and push to price feed.
+
+    Called on startup and every 5 minutes to pick up new alert rules.
+    No-op if the price feed is not initialized.
+    """
+    global _price_feed
+    if _price_feed is None:
+        return
+    rules_by_ticker = get_all_active_alerts_grouped_by_ticker()
+    tickers = set(rules_by_ticker.keys())
+    _price_feed.refresh_subscriptions(tickers)
 
 
 def reconciliation_tick() -> None:
@@ -283,17 +377,42 @@ def main() -> None:
 
     _startup_check()
 
+    # Initialize price feed
+    global _price_feed
+    _api_key = os.environ.get("FINNHUB_API_KEY", "")
+    if _api_key:
+        _price_feed = FinnhubPriceFeed(_api_key)
+        # Load initial ticker subscriptions from active alert rules
+        _refresh_price_feed_subscriptions()
+        _price_feed.start()
+        logger.info("Price feed started via Finnhub WebSocket")
+    else:
+        logger.warning(
+            "FINNHUB_API_KEY not set — real-time price feed disabled"
+        )
+
     last_check_tick = 0.0
     last_reconciliation_tick = 0.0
     last_poll_tick = 0.0
     last_maintenance_tick = time.time()
 
+    global _last_sub_refresh
+
     logger.info(
-        "Entering main loop (reconciliation=60s, check=60s, poll=5s, news=15m, maintenance=24h)"
+        "Entering main loop (reconciliation=60s, check=60s, poll=5s, "
+        "news=15m, maintenance=24h)"
     )
 
     while True:
         now = time.time()
+
+        # Subscription refresh for price feed — every 5 minutes
+        if now - _last_sub_refresh >= _SUB_REFRESH_INTERVAL:
+            _refresh_price_feed_subscriptions()
+            _last_sub_refresh = now
+
+        # Price feed tick — every loop iteration (cheap if no events)
+        price_tick(_price_feed)
 
         # Reconciliation tick — every 60 seconds (no stagger)
         if now - last_reconciliation_tick >= 60:

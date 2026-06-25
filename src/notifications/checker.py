@@ -168,6 +168,38 @@ def check_all_tickers_for_user(user_id: int) -> Dict[str, List[Dict]]:
     return results
 
 
+def evaluate_price_alert(
+    user_id: int, ticker: str, price: float
+) -> List[Dict]:
+    """Evaluate custom alert rules for a ticker using only the current price.
+
+    Bypasses full yfinance fetch. Creates a minimal data dict with just the
+    price so that ``_extract_price`` fires but OHLCV-backed extractors (RSI,
+    MACD, Bollinger, SMA crossover, price change %, volume spike) return
+    None and are skipped. Fundamental and news signals also return None/0.
+
+    Designed for the Finnhub real-time price feed path. Returns the same
+    format as ``run_check_for_ticker()``.
+
+    Args:
+        user_id: The user whose rules to evaluate.
+        ticker: The stock ticker symbol.
+        price: The current trade price.
+
+    Returns:
+        List of notification dicts (empty if no rules matched).
+    """
+    data = {"market": {"price": price}}
+    notifications = evaluate_custom_alerts(
+        user_id, ticker, data, {},
+        history_override=pd.DataFrame(),
+    )
+    if notifications:
+        for n in notifications:
+            n["current_price"] = price
+    return notifications
+
+
 def format_push_notification(
     notification: Dict,
 ) -> tuple:
