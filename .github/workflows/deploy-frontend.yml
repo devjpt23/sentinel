@@ -22,5 +22,5 @@ jobs:
             echo "https://github.com/devjpt23/sentinel/settings/secrets/actions as VERCEL_TOKEN"
             exit 0
           fi
-          npx vercel deploy --prod --token="$VERCEL_TOKEN"
+          npx vercel deploy --prod --yes --token="$VERCEL_TOKEN"
         working-directory: ./web
