@@ -270,6 +270,57 @@ class TestDeliverNotifications:
         assert delivered == 0
         mock_push.assert_not_called()
 
+    @patch("src.notifications.checker.send_push_notifications")
+    @patch("src.notifications.checker.get_all_active_subscriptions")
+    @patch("src.notifications.checker.get_preferences")
+    @patch("src.notifications.checker.get_custom_alert_rule_by_id")
+    def test_news_notification_uses_article_url(
+        self, mock_get_rule, mock_prefs, mock_subs, mock_push
+    ):
+        """News notification must use the article URL in push payload."""
+        mock_prefs.return_value = {"push_enabled": 1, "telegram_enabled": 0}
+        mock_subs.return_value = {1: [{"endpoint": "https://push.example.com"}]}
+        mock_get_rule.return_value = {"fire_push": 1}
+        mock_push.return_value = [{"status": "sent"}]
+
+        notifications = {"NVDA": [{
+            "rule_id": 42,
+            "ticker": "NVDA",
+            "title": "News: NVDA hits new high",
+            "body": "article body",
+            "id": 1,
+            "url": "https://reuters.com/article/nvda-123",
+        }]}
+
+        deliver_notifications(1, notifications)
+        call_kwargs = mock_push.call_args[1]
+        assert call_kwargs["data"]["url"] == "https://reuters.com/article/nvda-123"
+
+    @patch("src.notifications.checker.send_push_notifications")
+    @patch("src.notifications.checker.get_all_active_subscriptions")
+    @patch("src.notifications.checker.get_preferences")
+    @patch("src.notifications.checker.get_custom_alert_rule_by_id")
+    def test_non_news_notification_falls_back_to_company_url(
+        self, mock_get_rule, mock_prefs, mock_subs, mock_push
+    ):
+        """Non-news notification must fall back to /company/{ticker}."""
+        mock_prefs.return_value = {"push_enabled": 1, "telegram_enabled": 0}
+        mock_subs.return_value = {1: [{"endpoint": "https://push.example.com"}]}
+        mock_get_rule.return_value = {"fire_push": 1}
+        mock_push.return_value = [{"status": "sent"}]
+
+        notifications = {"AAPL": [{
+            "rule_id": 42,
+            "ticker": "AAPL",
+            "title": "Price Alert",
+            "body": "AAPL > $200",
+            "id": 2,
+        }]}
+
+        deliver_notifications(1, notifications)
+        call_kwargs = mock_push.call_args[1]
+        assert call_kwargs["data"]["url"] == "/company/AAPL"
+
 
 # ─── check_ticker_news ─────────────────────────────────────────────
 

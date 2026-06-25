@@ -268,7 +268,7 @@ def deliver_notifications(user_id: int, notifications_by_ticker: Dict[str, List[
                             "ticker": n.get("ticker"),
                             "rule_id": rule_id,
                             "notification_id": n.get("id"),
-                            "url": f"/company/{n.get('ticker', '')}",
+                            "url": n.get("url") or f"/company/{n.get('ticker', '')}",
                             "severity": n.get("severity"),
                             "notification_type": n.get("type"),
                             **extra_data,
