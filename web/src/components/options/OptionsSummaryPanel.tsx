@@ -42,7 +42,7 @@ export function OptionsSummaryPanel({ summary, underlyingPrice, isLoading }: Opt
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       {/* ATM IV */}
       <Card className="p-4 bg-[#15202b] border-[#1e2d3a]">
-        <p className="text-xs text-[#6b7f8e] font-medium mb-1">ATM IV</p>
+        <p className="text-xs text-[#6b7f8e] font-medium mb-1">ATM Vol</p>
         <p className="text-2xl font-bold text-[#c8d8e4]">
           {summary?.atm_iv != null ? formatPercent(summary.atm_iv, 1) : "—"}
         </p>
@@ -50,7 +50,7 @@ export function OptionsSummaryPanel({ summary, underlyingPrice, isLoading }: Opt
 
       {/* PCR (OI) */}
       <Card className="p-4 bg-[#15202b] border-[#1e2d3a]">
-        <p className="text-xs text-[#6b7f8e] font-medium mb-1">PCR (OI)</p>
+        <p className="text-xs text-[#6b7f8e] font-medium mb-1">Put/Call (OI)</p>
         <p className={`text-2xl font-bold ${getPcrColor(summary?.put_call_ratio_oi ?? null)}`}>
           {summary?.put_call_ratio_oi != null ? summary.put_call_ratio_oi.toFixed(2) : "—"}
         </p>
@@ -58,7 +58,7 @@ export function OptionsSummaryPanel({ summary, underlyingPrice, isLoading }: Opt
 
       {/* PCR (Vol) */}
       <Card className="p-4 bg-[#15202b] border-[#1e2d3a]">
-        <p className="text-xs text-[#6b7f8e] font-medium mb-1">PCR (Vol)</p>
+        <p className="text-xs text-[#6b7f8e] font-medium mb-1">Put/Call (Vol)</p>
         <p className={`text-2xl font-bold ${getPcrColor(summary?.put_call_ratio_vol ?? null)}`}>
           {summary?.put_call_ratio_vol != null ? summary.put_call_ratio_vol.toFixed(2) : "—"}
         </p>

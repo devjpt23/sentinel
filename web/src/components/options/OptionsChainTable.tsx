@@ -167,17 +167,17 @@ export function OptionsChainTable({ chain, expirations, underlyingPrice, isLoadi
 
   // ── Full table ─────────────────────────────────────────────────
   const columns = [
-    { key: "calls_ltp", label: "LTP", side: "calls" as const },
-    { key: "calls_vol", label: "Vol", side: "calls" as const },
-    { key: "calls_oi", label: "OI", side: "calls" as const },
-    { key: "calls_iv", label: "IV", side: "calls" as const },
+    { key: "calls_ltp", label: "Price", side: "calls" as const },
+    { key: "calls_vol", label: "Volume", side: "calls" as const },
+    { key: "calls_oi", label: "Open Interest", side: "calls" as const },
+    { key: "calls_iv", label: "Implied Vol", side: "calls" as const },
   ] as const;
 
   const putColumns = [
-    { key: "puts_ltp", label: "LTP", side: "puts" as const },
-    { key: "puts_vol", label: "Vol", side: "puts" as const },
-    { key: "puts_oi", label: "OI", side: "puts" as const },
-    { key: "puts_iv", label: "IV", side: "puts" as const },
+    { key: "puts_ltp", label: "Price", side: "puts" as const },
+    { key: "puts_vol", label: "Volume", side: "puts" as const },
+    { key: "puts_oi", label: "Open Interest", side: "puts" as const },
+    { key: "puts_iv", label: "Implied Vol", side: "puts" as const },
   ] as const;
 
   return (

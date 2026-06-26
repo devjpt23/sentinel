@@ -17,9 +17,9 @@ describe("OptionsSummaryPanel", () => {
       <OptionsSummaryPanel summary={defaultSummary} underlyingPrice={185.50} isLoading={false} />,
     );
 
-    expect(screen.getByText("ATM IV")).toBeInTheDocument();
-    expect(screen.getByText("PCR (OI)")).toBeInTheDocument();
-    expect(screen.getByText("PCR (Vol)")).toBeInTheDocument();
+    expect(screen.getByText("ATM Vol")).toBeInTheDocument();
+    expect(screen.getByText("Put/Call (OI)")).toBeInTheDocument();
+    expect(screen.getByText("Put/Call (Vol)")).toBeInTheDocument();
     expect(screen.getByText("Max Pain")).toBeInTheDocument();
   });
 
