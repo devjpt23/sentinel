@@ -883,19 +883,30 @@ def _options_data(ticker: str) -> tuple[Optional[dict], Optional[tuple]]:
                         if isinstance(v, dict):
                             snapshots[k] = v
 
-        # ── Step 4: Determine underlying price ─────────────────
+        # ── Step 4: Determine underlying price — prefer yfinance over Alpaca ──
         underlying_price: Optional[float] = None
         try:
-            stock_url = f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/trades/latest"
-            stock_resp = requests.get(stock_url, headers=headers, timeout=10)
-            if stock_resp.status_code == 200:
-                stock_data = stock_resp.json()
-                trade = stock_data.get("trade") or {}
-                raw = trade.get("p")
-                if raw is not None:
-                    underlying_price = float(raw)
+            import yfinance as yf  # type: ignore
+            yf_ticker = yf.Ticker(ticker)
+            yf_history = yf_ticker.history(period="1d")
+            if not yf_history.empty:
+                close = yf_history["Close"].iloc[-1]
+                underlying_price = float(close)
         except Exception:
             pass
+
+        if underlying_price is None:
+            try:
+                stock_url = f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/trades/latest"
+                stock_resp = requests.get(stock_url, headers=headers, timeout=10)
+                if stock_resp.status_code == 200:
+                    stock_data = stock_resp.json()
+                    trade = stock_data.get("trade") or {}
+                    raw = trade.get("p")
+                    if raw is not None:
+                        underlying_price = float(raw)
+            except Exception:
+                pass
 
         # Fallback: estimate from ATM option bid/ask midpoint
         if underlying_price is None:
