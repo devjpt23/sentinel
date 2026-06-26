@@ -15,6 +15,8 @@ import os
 import secrets
 import time
 import threading
+import requests
+from typing import Optional
 
 # In-memory cache for expensive endpoint results
 _enriched_cache: dict[str, tuple[float, str]] = {}  # key -> (timestamp, json_response)
@@ -26,6 +28,12 @@ def _invalidate_enriched_cache(user_id: int) -> None:
     key = f"enriched:{user_id}"
     with _enriched_cache_lock:
         _enriched_cache.pop(key, None)
+
+
+# Options data cache (Alpaca + yfinance)
+_options_cache: dict[str, tuple[float, Optional[dict]]] = {}
+_OPTIONS_CACHE_TTL = 60  # 60 seconds
+_options_cache_lock = threading.Lock()
 
 
 from flask import Flask, request, jsonify, abort
@@ -123,6 +131,11 @@ logger = logging.getLogger(__name__)
 API_KEY = os.environ.get("SENTINEL_API_KEY", "")
 if not API_KEY:
     logger.error("SENTINEL_API_KEY environment variable is not set")
+
+ALPACA_API_KEY = os.environ.get("ALPACA_API_KEY", "")
+ALPACA_SECRET_KEY = os.environ.get("ALPACA_SECRET_KEY", "")
+ALPACA_BASE_URL = os.environ.get("ALPACA_BASE_URL", "https://paper-api.alpaca.markets")
+ALPACA_DATA_URL = os.environ.get("ALPACA_DATA_URL", "https://data.alpaca.markets")
 
 app = Flask(__name__)
 
@@ -668,6 +681,476 @@ def _company_data(ticker: str, lite: bool = False):
         return None, ({"error": f"failed to fetch data for {ticker}: {str(e)}"}, 500)
 
 
+def _options_data(ticker: str) -> tuple[Optional[dict], Optional[tuple]]:
+    """Fetch options chain + summary from Alpaca (primary) + yfinance (supplemental).
+
+    Returns (data_dict, None) on success, or (None, (error_json, status_code)) on failure.
+
+    Steps:
+    1. Check cache first (60s TTL for success, 30s for failed sentinel)
+    2. Fetch option contracts from Alpaca
+    3. Group contracts by expiration date
+    4. Fetch snapshots from Alpaca in batches of 100
+    5. Supplement with yfinance OI/volume
+    6. Compute summary metrics (ATM_IV, P/C ratio, max pain)
+    7. Cache result and return shaped response
+    """
+    cache_key = f"options:{ticker}"
+    with _options_cache_lock:
+        entry = _options_cache.get(cache_key)
+        if entry:
+            age = time.time() - entry[0]
+            cached_data = entry[1]
+            if cached_data is None and age < 30:
+                # Cached failure sentinel — 30s TTL to avoid hammering Alpaca
+                return None, ({"error": "Failed to fetch options data: cached failure"}, 502)
+            if cached_data is not None and age < _OPTIONS_CACHE_TTL:
+                # Cached success — 60s TTL
+                return cached_data, None
+
+    if not ALPACA_API_KEY or not ALPACA_SECRET_KEY:
+        return None, ({"error": "Alpaca API keys not configured"}, 502)
+
+    headers = {
+        "APCA-API-KEY-ID": ALPACA_API_KEY,
+        "APCA-API-SECRET-KEY": ALPACA_SECRET_KEY,
+    }
+
+    def _cache_failure():
+        """Cache a failed sentinel with a short TTL."""
+        with _options_cache_lock:
+            # Store None as sentinel value for failed request
+            # The check logic uses a 30s TTL for None entries
+            _options_cache[cache_key] = (time.time(), None)
+
+    try:
+        # ── Step 1: Fetch contracts ────────────────────────────
+        contracts_url = (
+            f"{ALPACA_BASE_URL}/v2/options/contracts"
+            f"?underlying_symbol={ticker}&status=active"
+        )
+        resp = requests.get(contracts_url, headers=headers, timeout=15)
+
+        # 422 means the ticker is unknown or has no options — return empty, not error
+        if resp.status_code == 422:
+            empty = {"ticker": ticker, "underlying_price": None, "summary": {},
+                     "expirations": [], "chain": {}}
+            with _options_cache_lock:
+                _options_cache[cache_key] = (time.time(), empty)
+            return empty, None
+
+        if resp.status_code != 200:
+            _cache_failure()
+            return None, (
+                {"error": f"Alpaca contracts API returned {resp.status_code}: {resp.text[:200]}"},
+                502,
+            )
+
+        contracts_data = resp.json()
+        contracts = (contracts_data.get("option_contracts")
+                     or contracts_data.get("contracts")
+                     or [])
+
+        if not contracts:
+            empty = {"ticker": ticker, "underlying_price": None, "summary": {},
+                     "expirations": [], "chain": {}}
+            with _options_cache_lock:
+                _options_cache[cache_key] = (time.time(), empty)
+            return empty, None
+
+        # ── Step 2: Group contracts by expiration ──────────────
+        contract_symbols: list[str] = []
+        expirations_map: dict[str, dict[str, list[dict]]] = {}
+
+        for contract in contracts:
+            cid = contract.get("id", "")
+            symbol = contract.get("symbol", "")
+            exp_date = contract.get("expiration_date", "")
+            try:
+                strike = float(contract.get("strike_price", 0))
+            except (ValueError, TypeError):
+                strike = 0.0
+            ctype = (contract.get("type") or "").lower()
+
+            if not symbol or not exp_date:
+                continue
+
+            contract_symbols.append(symbol)
+
+            if exp_date not in expirations_map:
+                expirations_map[exp_date] = {"calls": [], "puts": []}
+
+            bucket = "calls" if ctype == "call" else "puts"
+            expirations_map[exp_date][bucket].append({
+                "contract_id": cid,
+                "symbol": symbol,
+                "strike": strike,
+            })
+
+        if not contract_symbols:
+            empty = {"ticker": ticker, "underlying_price": None, "summary": {},
+                     "expirations": [], "chain": {}}
+            with _options_cache_lock:
+                _options_cache[cache_key] = (time.time(), empty)
+            return empty, None
+
+        # ── Step 3: Supplement with yfinance for broader expiration coverage ──
+        try:
+            import yfinance as yf
+            yf_ticker_obj = yf.Ticker(ticker)
+            yf_expirations = list(yf_ticker_obj.options or [])
+        except Exception:
+            yf_ticker_obj = None
+            yf_expirations = []
+
+        # Collect Alpaca contract symbols for snapshot batching (skip yfinance-only)
+        alpaca_symbols = [s for s in contract_symbols if not s.startswith("yf_")]
+        yf_only_data: dict[str, dict] = {}
+
+        for exp_date in yf_expirations:
+            if exp_date in expirations_map:
+                continue  # Already have Alpaca contracts for this date
+            if yf_ticker_obj is None:
+                break
+            try:
+                yf_chain = yf_ticker_obj.option_chain(exp_date)
+            except Exception:
+                continue
+
+            if exp_date not in expirations_map:
+                expirations_map[exp_date] = {"calls": [], "puts": []}
+
+            def _yf_val(row_val, to_type):
+                """Safely convert yfinance value (which may be NaN) to target type."""
+                if row_val is None:
+                    return None
+                try:
+                    if isinstance(row_val, float) and (row_val != row_val):
+                        return None
+                    return to_type(row_val)
+                except (ValueError, TypeError, OverflowError):
+                    return None
+
+            for ctype_col, ctype_name in [("calls", "call"), ("puts", "put")]:
+                df = getattr(yf_chain, ctype_col, None)
+                if df is None:
+                    continue
+                for _, row in df.iterrows():
+                    strike = _yf_val(row.get("strike"), float)
+                    if strike is None:
+                        continue
+                    sid = f"yf_{ticker}_{exp_date}_{ctype_name}_{strike}"
+                    contract_symbols.append(sid)
+                    yf_only_data[sid] = {
+                        "strike": strike,
+                        "contract_id": sid,
+                        "last_price": _yf_val(row.get("lastPrice"), float),
+                        "bid": _yf_val(row.get("bid"), float),
+                        "ask": _yf_val(row.get("ask"), float),
+                        "volume": _yf_val(row.get("volume"), int),
+                        "open_interest": _yf_val(row.get("openInterest"), int),
+                        "iv": _yf_val(row.get("impliedVolatility"), float),
+                    }
+                    expirations_map[exp_date][ctype_col].append({
+                        "contract_id": sid,
+                        "symbol": sid,
+                        "strike": strike,
+                    })
+
+        if not contract_symbols:
+            empty = {"ticker": ticker, "underlying_price": None, "summary": {},
+                     "expirations": [], "chain": {}}
+            with _options_cache_lock:
+                _options_cache[cache_key] = (time.time(), empty)
+            return empty, None
+
+        # ── Step 4: Fetch Alpaca snapshots in batches of 100 ──
+        snapshots: dict[str, dict] = {}
+        for i in range(0, len(alpaca_symbols), 100):
+            batch = alpaca_symbols[i:i + 100]
+            ids_str = ",".join(batch)
+            snap_url = (
+                f"{ALPACA_DATA_URL}/v1beta1/options/snapshots"
+                f"?symbols={ids_str}"
+            )
+            snap_resp = requests.get(snap_url, headers=headers, timeout=15)
+            if snap_resp.status_code == 200:
+                snap_data = snap_resp.json()
+                # Alpaca returns {"snapshots": {symbol: {...}}} where keys are contract symbols
+                snap_map = snap_data.get("snapshots", snap_data)
+                if isinstance(snap_map, dict):
+                    for k, v in snap_map.items():
+                        if isinstance(v, dict):
+                            snapshots[k] = v
+
+        # ── Step 4: Determine underlying price ─────────────────
+        underlying_price: Optional[float] = None
+        try:
+            stock_url = f"{ALPACA_DATA_URL}/v2/stocks/{ticker}/trades/latest"
+            stock_resp = requests.get(stock_url, headers=headers, timeout=10)
+            if stock_resp.status_code == 200:
+                stock_data = stock_resp.json()
+                trade = stock_data.get("trade") or {}
+                raw = trade.get("p")
+                if raw is not None:
+                    underlying_price = float(raw)
+        except Exception:
+            pass
+
+        # Fallback: estimate from ATM option bid/ask midpoint
+        if underlying_price is None:
+            for _sym, snap in snapshots.items():
+                lq = snap.get("latestQuote") or {}
+                if isinstance(lq, dict):
+                    bid = lq.get("bp")
+                    ask = lq.get("ap")
+                else:
+                    bid = ask = None
+                if bid is not None and ask is not None:
+                    try:
+                        underlying_price = (float(bid) + float(ask)) / 2
+                        break
+                    except (ValueError, TypeError):
+                        continue
+
+        # ── Step 5: Build chain data with snapshot info ────────
+        sorted_expirations = sorted(expirations_map.keys())
+        chain_data: dict[str, dict[str, list[dict]]] = {}
+
+        def _safe_float(val, default=None):
+            if val is None:
+                return default
+            try:
+                f = float(val)
+                if f != f:  # NaN check
+                    return default
+                return f
+            except (ValueError, TypeError):
+                return default
+
+        for exp_date in sorted_expirations:
+            calls_out: list[dict] = []
+            puts_out: list[dict] = []
+
+            for ctype_bucket, out_list in [("calls", calls_out), ("puts", puts_out)]:
+                for contract_info in expirations_map[exp_date][ctype_bucket]:
+                    symbol = contract_info["symbol"]
+
+                    # Check if this is a yfinance-only contract
+                    yf_entry = yf_only_data.get(symbol)
+                    if yf_entry is not None:
+                        out_list.append({
+                            "strike": contract_info["strike"],
+                            "contract_id": contract_info["contract_id"],
+                            "last_price": yf_entry.get("last_price"),
+                            "bid": yf_entry.get("bid"),
+                            "ask": yf_entry.get("ask"),
+                            "volume": yf_entry.get("volume"),
+                            "open_interest": yf_entry.get("open_interest"),
+                            "iv": yf_entry.get("iv"),
+                            "delta": None,
+                            "gamma": None,
+                            "theta": None,
+                            "vega": None,
+                            "rho": None,
+                        })
+                        continue
+
+                    snap = snapshots.get(symbol, {})
+                    latest_trade = snap.get("latestTrade") or {}
+                    if not isinstance(latest_trade, dict):
+                        latest_trade = {}
+                    latest_quote = snap.get("latestQuote") or {}
+                    if not isinstance(latest_quote, dict):
+                        latest_quote = {}
+                    greeks = snap.get("Greeks") or {}
+                    if not isinstance(greeks, dict):
+                        greeks = {}
+
+                    opt_entry = {
+                        "strike": contract_info["strike"],
+                        "contract_id": contract_info["contract_id"],
+                        "last_price": _safe_float(
+                            latest_trade.get("p") or latest_trade.get("price")
+                        ),
+                        "bid": _safe_float(latest_quote.get("bp")),
+                        "ask": _safe_float(latest_quote.get("ap")),
+                        "volume": None,        # filled by yfinance supplement
+                        "open_interest": None,  # filled by yfinance supplement
+                        "iv": _safe_float(snap.get("impliedVolatility")),
+                        "delta": _safe_float(greeks.get("delta")),
+                        "gamma": _safe_float(greeks.get("gamma")),
+                        "theta": _safe_float(greeks.get("theta")),
+                        "vega": _safe_float(greeks.get("vega")),
+                        "rho": _safe_float(greeks.get("rho")),
+                    }
+                    out_list.append(opt_entry)
+
+            chain_data[exp_date] = {"calls": calls_out, "puts": puts_out}
+
+        # ── Step 6: Supplement Alpaca contracts with yfinance OI/volume ─────────
+        try:
+            import yfinance as yf  # type: ignore
+            yf_ticker = yf.Ticker(ticker)
+            for exp_date in sorted_expirations:
+                try:
+                    yf_chain = yf_ticker.option_chain(exp_date)
+                except Exception:
+                    continue  # yfinance may not have this expiration
+
+                def _yf_val(row_val, to_type):
+                    if row_val is None:
+                        return None
+                    try:
+                        if isinstance(row_val, float) and (row_val != row_val):
+                            return None
+                        return to_type(row_val)
+                    except (ValueError, TypeError, OverflowError):
+                        return None
+
+                def _build_yf_map(df):
+                    m = {}
+                    for _, row in df.iterrows():
+                        strike = _yf_val(row.get("strike"), float)
+                        if strike is None:
+                            continue
+                        oi_raw = row.get("openInterest") or row.get("open_interest")
+                        vol_raw = row.get("volume")
+                        iv_raw = row.get("impliedVolatility")
+                        m[strike] = {
+                            "open_interest": _yf_val(oi_raw, int),
+                            "volume": _yf_val(vol_raw, int),
+                            "iv": _yf_val(iv_raw, float),
+                        }
+                    return m
+
+                yf_calls = _build_yf_map(yf_chain.calls) if yf_chain.calls is not None else {}
+                yf_puts = _build_yf_map(yf_chain.puts) if yf_chain.puts is not None else {}
+
+                for opt in chain_data[exp_date].get("calls", []):
+                    strike = opt["strike"]
+                    sup = yf_calls.get(strike, {})
+                    if sup.get("open_interest") is not None:
+                        opt["open_interest"] = sup["open_interest"]
+                    if sup.get("volume") is not None:
+                        opt["volume"] = sup["volume"]
+                    if opt["iv"] is None and sup.get("iv") is not None:
+                        opt["iv"] = sup["iv"]
+
+                for opt in chain_data[exp_date].get("puts", []):
+                    strike = opt["strike"]
+                    sup = yf_puts.get(strike, {})
+                    if sup.get("open_interest") is not None:
+                        opt["open_interest"] = sup["open_interest"]
+                    if sup.get("volume") is not None:
+                        opt["volume"] = sup["volume"]
+                    if opt["iv"] is None and sup.get("iv") is not None:
+                        opt["iv"] = sup["iv"]
+        except Exception:
+            # yfinance entirely unavailable — OI/volume stay None
+            pass
+
+        # ── Step 7: Compute summary metrics ────────────────────
+        total_call_oi = 0
+        total_put_oi = 0
+        total_call_vol = 0
+        total_put_vol = 0
+
+        atm_iv: Optional[float] = None
+        min_strike_diff = float("inf")
+
+        pain_by_strike: dict[float, float] = {}
+
+        for exp_date in sorted_expirations:
+            for opt in chain_data[exp_date].get("calls", []):
+                oi = opt.get("open_interest") or 0
+                vol = opt.get("volume") or 0
+                total_call_oi += oi
+                total_call_vol += vol
+
+                # ATM IV tracking
+                if opt.get("iv") is not None and underlying_price is not None:
+                    sd = abs(opt["strike"] - underlying_price)
+                    if sd < min_strike_diff:
+                        min_strike_diff = sd
+                        atm_iv = opt["iv"]
+
+                # Max pain: call value = max(underlying - strike, 0) * OI
+                if oi > 0 and underlying_price is not None:
+                    call_val = max(underlying_price - opt["strike"], 0) * oi
+                    pain_by_strike[opt["strike"]] = (
+                        pain_by_strike.get(opt["strike"], 0) + call_val
+                    )
+
+            for opt in chain_data[exp_date].get("puts", []):
+                oi = opt.get("open_interest") or 0
+                vol = opt.get("volume") or 0
+                total_put_oi += oi
+                total_put_vol += vol
+
+                # ATM IV tracking
+                if opt.get("iv") is not None and underlying_price is not None:
+                    sd = abs(opt["strike"] - underlying_price)
+                    if sd < min_strike_diff:
+                        min_strike_diff = sd
+                        atm_iv = opt["iv"]
+
+                # Max pain: put value = max(strike - underlying, 0) * OI
+                if oi > 0 and underlying_price is not None:
+                    put_val = max(opt["strike"] - underlying_price, 0) * oi
+                    pain_by_strike[opt["strike"]] = (
+                        pain_by_strike.get(opt["strike"], 0) + put_val
+                    )
+
+        # Determine max pain strike (highest total pain = greatest loss for buyers)
+        max_pain: Optional[float] = None
+        highest_pain = -1.0
+        for strike, total_pain in pain_by_strike.items():
+            if total_pain > highest_pain:
+                highest_pain = total_pain
+                max_pain = strike
+
+        put_call_oi = (
+            round(total_put_oi / total_call_oi, 2) if total_call_oi > 0 else None
+        )
+        put_call_vol = (
+            round(total_put_vol / total_call_vol, 2) if total_call_vol > 0 else None
+        )
+
+        summary = {
+            "atm_iv": round(atm_iv, 4) if atm_iv is not None else None,
+            "put_call_ratio_oi": put_call_oi,
+            "put_call_ratio_vol": put_call_vol,
+            "max_pain": max_pain,
+            "total_call_oi": total_call_oi,
+            "total_put_oi": total_put_oi,
+        }
+
+        result = {
+            "ticker": ticker,
+            "underlying_price": underlying_price,
+            "summary": summary,
+            "expirations": sorted_expirations,
+            "chain": chain_data,
+        }
+
+        # Cache the success
+        with _options_cache_lock:
+            _options_cache[cache_key] = (time.time(), result)
+
+        return result, None
+
+    except requests.exceptions.Timeout:
+        _cache_failure()
+        return None, ({"error": "Failed to fetch options data: request timed out"}, 502)
+    except requests.exceptions.ConnectionError:
+        _cache_failure()
+        return None, ({"error": "Failed to fetch options data: connection error"}, 502)
+    except Exception as e:
+        _cache_failure()
+        return None, ({"error": f"Failed to fetch options data: {str(e)}"}, 502)
+
+
 def _filter_news(items: list[dict]) -> list[dict]:
     """Deduplicate and filter low-quality news items."""
     skip_sources = {"press release", "business wire", "globenewswire", "pr newswire"}
@@ -810,6 +1293,15 @@ def data_price_history(ticker):
     if not candles:
         return jsonify({"error": f"no price history available for {ticker}"}), 404
     return jsonify({"candles": candles})
+
+
+@app.route("/api/data/<ticker>/options", methods=["GET"])
+def data_options(ticker):
+    """Options chain + summary metrics from Alpaca (+ yfinance OI/volume)."""
+    data, err = _options_data(ticker.upper())
+    if data is None:
+        return jsonify(err[0]), err[1]
+    return jsonify(data)
 
 
 @app.route("/api/data/<ticker>/financials", methods=["GET"])

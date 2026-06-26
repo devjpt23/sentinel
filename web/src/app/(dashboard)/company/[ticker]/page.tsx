@@ -24,6 +24,7 @@ import { RiskBadge } from "@/components/shared/RiskBadge";
 import { PriceChart } from "@/components/charts/PriceChart";
 import { useHealth, useIntrinsic, useRisk, useFinancials, useDcf, usePriceHistory, useSentiment, useInstitutional, useInsider, usePriceGrowth, useMacro, useIndices } from "@/hooks/use-company-data";
 import { OverviewCard } from "@/components/company/OverviewCard";
+import { OptionsTab } from "@/components/options/OptionsTab";
 import { DcfHeatmap } from "@/components/company/DcfHeatmap";
 import {
   formatCurrency, formatPercent, formatPrice, formatPct, formatRelativeTime,
@@ -414,6 +415,7 @@ export default function CompanyDeepDivePage() {
           { id: "financials", label: "Financials" },
           { id: "valuation", label: "Valuation" },
           { id: "risk", label: "Risk" },
+          { id: "options", label: "Options" },
         ]}
         activeTab={activeTab}
         onTabChange={setActiveTab}
@@ -451,6 +453,9 @@ export default function CompanyDeepDivePage() {
           riskData={riskData}
           riskLoading={riskLoading}
         />
+      )}
+      {activeTab === "options" && (
+        <OptionsTab ticker={ticker} />
       )}
     </div>
   );

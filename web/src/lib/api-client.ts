@@ -99,6 +99,8 @@ export const api = {
   getInsider: (ticker: string) => fetchApi<Record<string, unknown>>(`/api/data/${ticker}/insider`),
   getEcosystem: (ticker: string) => fetchApi<Record<string, unknown>>(`/api/data/${ticker}/ecosystem`),
   getSupplyChain: (ticker: string) => fetchApi<Record<string, unknown>>(`/api/data/${ticker}/supply-chain`),
+  getOptions: (ticker: string) =>
+    fetchApi<Record<string, unknown>>(`/api/data/${ticker}/options`),
 
   // User & Auth
   /**

@@ -122,3 +122,12 @@ export function useIndices() {
     enabled: true,
   });
 }
+
+export function useOptions(ticker: string) {
+  return useQuery({
+    queryKey: ["company", ticker, "options"],
+    queryFn: () => api.getOptions(ticker),
+    staleTime: 60_000, // options data changes fast
+    enabled: !!ticker,
+  });
+}
